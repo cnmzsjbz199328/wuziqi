@@ -7,7 +7,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 
 @ExtendWith(MockitoExtension.class)
@@ -26,12 +27,8 @@ public class GameControllerTest {
         move.setColumn(2);
         move.setPlayer("Player1");
 
-        GameMove processedMove = gameController.processMove(move);
+        gameController.processMove(move);
 
-        assertEquals(move.getRow(), processedMove.getRow());
-        assertEquals(move.getColumn(), processedMove.getColumn());
-        assertEquals(move.getPlayer(), processedMove.getPlayer());
-
-        verify(template).convertAndSend("/topic/gameState", processedMove);
+        verify(template).convertAndSend(eq("/topic/gameState"), eq(move));
     }
 }
