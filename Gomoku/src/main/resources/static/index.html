@@ -1,41 +1,63 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>WebSocket Test</title>
-    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.5.1/dist/sockjs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <title>Gomoku Game</title>
+    <style>
+        table {
+            border-collapse: collapse;
+        }
+        td {
+            width: 20px;
+            height: 20px;
+            text-align: center;
+            border: 1px solid black;
+        }
+    </style>
+    <script>
+        function makeMove(row, col) {
+            fetch('/game/move', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ row: row, col: col })
+            })
+            .then(response => response.json())
+            .then(data => {
+                updateBoard(data.board);
+                if (data.winner) {
+                    alert(data.winner + ' wins!');
+                }
+            });
+        }
+
+        function updateBoard(board) {
+            if (!Array.isArray(board) || !Array.isArray(board[0])) {
+                console.error('Invalid board data:', board);
+                return;
+            }
+            const table = document.getElementById('board');
+            for (let i = 0; i < board.length; i++) {
+                for (let j = 0; j < board[i].length; j++) {
+                    table.rows[i].cells[j].innerText = board[i][j] ? (board[i][j] === "Player1" ? "P" : "B") : '';
+                }
+            }
+        }
+    </script>
 </head>
 <body>
-<h1>WebSocket Test</h1>
-<button onclick="connect()">Connect</button>
-<button onclick="sendMessage()">Send Message</button>
-<div id="messages"></div>
-
-<script>
-    var stompClient = null;
-
-    function connect() {
-        var socket = new SockJS('/gomoku-websocket');
-        stompClient = Stomp.over(socket);
-        stompClient.connect({}, function(frame) {
-            console.log('Connected: ' + frame);
-            document.getElementById('messages').innerHTML += '<p>Connected</p>';
-            stompClient.subscribe('/topic/gameState', function(message) {
-                showMessage(JSON.parse(message.body));
-            });
-        });
-    }
-
-    function sendMessage() {
-        var move = { row: 1, column: 1 };
-        stompClient.send("/app/move", {}, JSON.stringify(move));
-        document.getElementById('messages').innerHTML += '<p>Sent: ' + move.row + ', ' + move.column + '</p>';
-    }
-
-    function showMessage(message) {
-        document.getElementById('messages').innerHTML += '<p>Received: ' + message.row + ', ' + message.column + '</p>';
-    }
-</script>
+<h1>Gomoku Game</h1>
+<table id="board">
+    <script>
+        for (let i = 0; i < 15; i++) {
+            document.write('<tr>');
+            for (let j = 0; j < 15; j++) {
+                document.write(`<td onclick="makeMove(${i}, ${j})"></td>`);
+            }
+            document.write('</tr>');
+        }
+    </script>
+</table>
 </body>
 </html>

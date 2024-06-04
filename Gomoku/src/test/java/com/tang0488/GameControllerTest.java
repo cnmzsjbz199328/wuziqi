@@ -1,34 +1,41 @@
 package com.tang0488;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.setup.MockMvcBuilders.webAppContextSetup;
 
-@ExtendWith(MockitoExtension.class)
+@SpringBootTest
 public class GameControllerTest {
 
-    @Mock
-    private SimpMessagingTemplate template;
+    @Autowired
+    private WebApplicationContext webApplicationContext;
 
-    @InjectMocks
-    private GameController gameController;
+    private MockMvc mockMvc;
+
+    @BeforeEach
+    public void setup() {
+        this.mockMvc = webAppContextSetup(this.webApplicationContext).build();
+    }
 
     @Test
-    public void testProcessMove() {
-        GameMove move = new GameMove();
-        move.setRow(1);
-        move.setColumn(2);
-        move.setPlayer("Player1");
+    public void testMakeMove() throws Exception {
+        String moveRequestJson = "{\"row\":0,\"col\":0}";
 
-        gameController.processMove(move);
-
-        verify(template).convertAndSend(eq("/topic/gameState"), eq(move));
+        mockMvc.perform(post("/move")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(moveRequestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.board").exists())
+                .andExpect(jsonPath("$.winner").doesNotExist());
     }
 }

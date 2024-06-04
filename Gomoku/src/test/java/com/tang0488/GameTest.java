@@ -1,7 +1,7 @@
 package com.tang0488;
 
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class GameTest {
 
@@ -16,8 +16,8 @@ public class GameTest {
         game.makeMove(1, 2); // Player2
         game.makeMove(0, 3); // Player1
         game.makeMove(1, 3); // Player2
-        boolean result = game.makeMove(0, 4); // Player1
+        game.makeMove(0, 4); // Player1
 
-        assertEquals(true, result);
+        assertTrue(game.getBoard().checkWin("Player1"));
     }
 }
