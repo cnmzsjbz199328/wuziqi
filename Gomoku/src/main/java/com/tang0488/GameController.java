@@ -41,7 +41,7 @@ public class GameController {
 				response.put("winner", game.getCurrentPlayer());
 			} else {
 				game.switchPlayer();
-				game.makeRandomMove(); // 添加随机玩家移动
+				game.getMoveStrategy().makeMove(game.getBoard(), game.getCurrentPlayer()); // 添加随机玩家移动
 				response.put("board", game.getBoard().getBoard());
 				if (game.checkWin(game.getCurrentPlayer())) { // 再次检查当前玩家是否胜利
 					response.put("winner", game.getCurrentPlayer());

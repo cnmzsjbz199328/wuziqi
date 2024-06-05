@@ -1,7 +1,7 @@
 package com.tang0488;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
-import java.util.Random;
 import java.util.Scanner;
 import java.util.Stack;
 
@@ -10,15 +10,16 @@ public class Game {
     private Board board;
     private String currentPlayer;
     private Scanner scanner;
-    private Random random;
     private Stack<int[]> moveHistory;
+    private MoveStrategy moveStrategy;
 
-    public Game() {
-        board = new Board();
-        currentPlayer = "Player1";
-        scanner = new Scanner(System.in);
-        random = new Random();
-        moveHistory = new Stack<>();
+    @Autowired
+    public Game(MoveStrategy moveStrategy) {
+        this.board = new Board();
+        this.currentPlayer = "Player1";
+        this.scanner = new Scanner(System.in);
+        this.moveHistory = new Stack<>();
+        this.moveStrategy = moveStrategy;
     }
 
     public void start() {
@@ -45,7 +46,7 @@ public class Game {
                     }
                 }
             } else {
-                makeRandomMove();
+                moveStrategy.makeMove(board, currentPlayer);
                 printBoard();
                 if (board.checkWin(currentPlayer)) {
                     System.out.println(currentPlayer + " wins!");
@@ -65,14 +66,8 @@ public class Game {
         return false;
     }
 
-    public void makeRandomMove() {
-        int row, col;
-        do {
-            row = random.nextInt(Board.SIZE);
-            col = random.nextInt(Board.SIZE);
-        } while (!board.addMove(row, col, currentPlayer));
-        System.out.println("Move made by " + currentPlayer + " at (" + row + ", " + col + ")");
-        moveHistory.push(new int[]{row, col});
+    public MoveStrategy getMoveStrategy() {
+        return moveStrategy;
     }
 
     public String getCurrentPlayer() {
