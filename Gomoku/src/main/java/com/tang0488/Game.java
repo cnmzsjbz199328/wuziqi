@@ -38,9 +38,13 @@ public class Game {
                         printBoard();
                         if (board.checkWin(currentPlayer)) {
                             System.out.println(currentPlayer + " wins!");
-                            break;
+                            board.clearWinningLine(currentPlayer);
+                            printBoard();
+
+                        }else{
+                            switchPlayer();
                         }
-                        switchPlayer();
+
                     } else {
                         System.out.println("Invalid move. Try again.");
                     }
@@ -50,9 +54,13 @@ public class Game {
                 printBoard();
                 if (board.checkWin(currentPlayer)) {
                     System.out.println(currentPlayer + " wins!");
-                    break;
+                    board.clearWinningLine(currentPlayer);
+                    printBoard();
+                    switchPlayer();
+                }else{
+                    switchPlayer();
                 }
-                switchPlayer();
+
             }
         }
     }

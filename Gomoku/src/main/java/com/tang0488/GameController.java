@@ -39,12 +39,14 @@ public class GameController {
 		if (moveMade) {
 			if (game.checkWin(game.getCurrentPlayer())) { // 修正调用方法
 				response.put("winner", game.getCurrentPlayer());
+				game.getBoard().clearWinningLine(game.getCurrentPlayer());
 			} else {
 				game.switchPlayer();
 				game.getMoveStrategy().makeMove(game.getBoard(), game.getCurrentPlayer()); // 添加随机玩家移动
 				response.put("board", game.getBoard().getBoard());
 				if (game.checkWin(game.getCurrentPlayer())) { // 再次检查当前玩家是否胜利
 					response.put("winner", game.getCurrentPlayer());
+					game.getBoard().clearWinningLine(game.getCurrentPlayer());
 				} else {
 					game.switchPlayer();
 				}
