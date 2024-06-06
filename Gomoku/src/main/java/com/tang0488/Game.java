@@ -40,7 +40,7 @@ public class Game {
                             System.out.println(currentPlayer + " wins!");
                             board.clearWinningLine(currentPlayer);
                             printBoard();
-
+                            switchPlayer();
                         }else{
                             switchPlayer();
                         }
