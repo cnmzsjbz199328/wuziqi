@@ -1,63 +1,44 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Gomoku Game</title>
-    <style>
-        table {
-            border-collapse: collapse;
-        }
-        td {
-            width: 20px;
-            height: 20px;
-            text-align: center;
-            border: 1px solid black;
-        }
-    </style>
-    <script>
-        function makeMove(row, col) {
-            fetch('/game/move', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ row: row, col: col })
-            })
-            .then(response => response.json())
-            .then(data => {
-                updateBoard(data.board);
-                if (data.winner) {
-                    alert(data.winner + ' wins!');
-                }
-            });
-        }
-
-        function updateBoard(board) {
-            if (!Array.isArray(board) || !Array.isArray(board[0])) {
-                console.error('Invalid board data:', board);
-                return;
-            }
-            const table = document.getElementById('board');
-            for (let i = 0; i < board.length; i++) {
-                for (let j = 0; j < board[i].length; j++) {
-                    table.rows[i].cells[j].innerText = board[i][j] ? (board[i][j] === "Player1" ? "P" : "B") : '';
-                }
-            }
-        }
-    </script>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1.4.0/dist/sockjs.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+    <script src="script.js" defer></script>
 </head>
 <body>
-<h1>Gomoku Game</h1>
-<table id="board">
-    <script>
-        for (let i = 0; i < 15; i++) {
-            document.write('<tr>');
-            for (let j = 0; j < 15; j++) {
-                document.write(`<td onclick="makeMove(${i}, ${j})"></td>`);
-            }
-            document.write('</tr>');
-        }
-    </script>
-</table>
+<div class="container">
+    <header>
+        <h1>Gomoku Game</h1>
+    </header>
+    <main>
+        <div id="game-container">
+            <table id="board"></table>
+            <div id="controls">
+                <div class="control-section">
+                    <h2>Register Player</h2>
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" placeholder="Enter username">
+                    <button onclick="registerPlayer()">Register</button>
+                </div>
+                <div class="control-section">
+                    <h2>Set Strategy</h2>
+                    <label for="strategy">Strategy:</label>
+                    <select id="strategy">
+                        <option value="random">Random</option>
+                        <option value="smart">Smart</option>
+                    </select>
+                    <button onclick="setStrategy()">Set Strategy</button>
+                </div>
+                <div class="control-section">
+                    <h2>Players</h2>
+                    <ul id="users"></ul>
+                </div>
+            </div>
+        </div>
+    </main>
+</div>
 </body>
 </html>

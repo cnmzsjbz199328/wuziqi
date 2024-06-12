@@ -2,23 +2,51 @@ package com.tang0488;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import lombok.Getter;
+import lombok.Setter;
+
+import jakarta.annotation.PostConstruct;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Scanner;
 import java.util.Stack;
-
+@Getter
+@Setter
 @Component
 public class Game {
+    private final UserPool userPool;
     private Board board;
-    private String currentPlayer;
+    private MoveStrategy moveStrategy;
     private Scanner scanner;
     private Stack<int[]> moveHistory;
-    private MoveStrategy moveStrategy;
+    private List<User> players;
+    private int currentPlayerIndex;
+
 
     @Autowired
-    public Game(MoveStrategy moveStrategy) {
+    public Game(UserPool userPool,RandomMoveStrategy randomMoveStrategy, SmartMoveStrategy smartMoveStrategy) {
+        this.userPool = userPool;
         this.board = new Board();
-        this.currentPlayer = "Player1";
         this.scanner = new Scanner(System.in);
         this.moveHistory = new Stack<>();
+        this.moveStrategy = smartMoveStrategy; // 默认策略
+        initializePlayers();
+    }
+    @PostConstruct
+    public void initializePlayers() {
+         this.players  = userPool.getUsers();
+        if (players.isEmpty()) {
+            throw new IllegalStateException("No users found in the repository.");
+        }
+        this.currentPlayerIndex = 0;
+    }
+
+    public void nextPlayer() {
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.size();
+        getCurrentPlayer();
+    }
+    public void setMoveStrategy(MoveStrategy moveStrategy) {
         this.moveStrategy = moveStrategy;
     }
 
@@ -26,68 +54,55 @@ public class Game {
         System.out.println("Welcome to Gomoku!");
         printBoard();
         while (true) {
-            if (currentPlayer.equals("Player1")) {
-                System.out.println(currentPlayer + ", enter your move (row and column) or 'u' to undo: ");
+            User currentPlayer = players.get(currentPlayerIndex);
+            if (currentPlayerIndex == 0) {
+                System.out.println(currentPlayer.getName() + ", enter your move (row and column) or 'u' to undo: ");
                 String input = scanner.next();
-                if (input.equals("u")) {
-                    undoMove();
-                } else {
                     int row = Integer.parseInt(input);
                     int col = scanner.nextInt();
                     if (makeMove(row, col)) {
                         printBoard();
-                        if (board.checkWin(currentPlayer)) {
-                            System.out.println(currentPlayer + " wins!");
-                            board.clearWinningLine(currentPlayer);
+                        if (board.checkWin(currentPlayer.getName())) {
+                            int clearedCount = board.clearWinningLine(currentPlayer.getName());
+                            currentPlayer.addScore(clearedCount);
+                            System.out.println(currentPlayer.getName() + " Score: " + currentPlayer.getScore());
+                            //board.clearWinningLine(currentPlayer.getName());
                             printBoard();
-                            switchPlayer();
-                        }else{
-                            switchPlayer();
                         }
-
+                        nextPlayer();
                     } else {
                         System.out.println("Invalid move. Try again.");
                     }
-                }
-            } else {
-                moveStrategy.makeMove(board, currentPlayer);
-                printBoard();
-                if (board.checkWin(currentPlayer)) {
-                    System.out.println(currentPlayer + " wins!");
-                    board.clearWinningLine(currentPlayer);
-                    printBoard();
-                    switchPlayer();
-                }else{
-                    switchPlayer();
-                }
 
+            } else {
+                moveStrategy.makeMove(board, currentPlayer.getName());
+                printBoard();
+                if (board.checkWin(currentPlayer.getName())) {
+                    int clearedCount = board.clearWinningLine(currentPlayer.getName());
+                    currentPlayer.addScore(clearedCount);
+                    System.out.println(currentPlayer.getName() + " Score: " + currentPlayer.getScore());
+                    printBoard();
+                }
+                nextPlayer();
             }
         }
     }
 
     public boolean makeMove(int row, int col) {
-        if (board.addMove(row, col, currentPlayer)) {
-            System.out.println("Move made by " + currentPlayer + " at (" + row + ", " + col + ")");
+        //User currentPlayer = players.get(currentPlayerIndex);
+        if (board.addMove(row, col, getCurrentPlayer())) {
+            System.out.println("Move made by " + getCurrentPlayer() + " at (" + row + ", " + col + ")");
             moveHistory.push(new int[]{row, col});
             return true;
         }
         return false;
     }
-
-    public MoveStrategy getMoveStrategy() {
-        return moveStrategy;
-    }
-
     public String getCurrentPlayer() {
-        return currentPlayer;
+        return players.get(currentPlayerIndex).getName();
     }
 
     public boolean checkWin(String player) {
         return board.checkWin(player);
-    }
-
-    public void switchPlayer() {
-        currentPlayer = currentPlayer.equals("Player1") ? "Player2" : "Player1";
     }
 
     private void printBoard() {
@@ -101,26 +116,9 @@ public class Game {
             System.out.print(row + " ");
             if (row < 10) System.out.print(" ");
             for (int col = 0; col < Board.SIZE; col++) {
-                // 更改显示字符，使用 "P" 表示 "Player1"，使用 "B" 表示 "Player2"
                 System.out.print((boardArray[row][col] == null ? "." : (boardArray[row][col].equals("Player1") ? "P" : "B")) + " ");
             }
             System.out.println();
         }
-    }
-
-    private void undoMove() {
-        if (!moveHistory.isEmpty()) {
-            int[] lastMove = moveHistory.pop();
-            board.removeMove(lastMove[0], lastMove[1]);
-            switchPlayer();
-            System.out.println("Undo last move by " + currentPlayer);
-            printBoard();
-        } else {
-            System.out.println("No moves to undo.");
-        }
-    }
-
-    public Board getBoard() {
-        return board;
     }
 }

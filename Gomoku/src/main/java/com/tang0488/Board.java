@@ -44,7 +44,7 @@ public class Board {
         return false;
     }
 
-    private int checkLine(String player, int startX, int startY, int stepX, int stepY) {
+    public int checkLine(String player, int startX, int startY, int stepX, int stepY) {
         int count = 0;
         for (int i = 0; i < 5; i++) {
             int x = startX + i * stepX;
@@ -58,7 +58,7 @@ public class Board {
         return count;
     }
 
-    public void clearWinningLine(String player) {
+    public int clearWinningLine(String player) {
         int totalRemoved = 0; // 用于记录被移除的棋子数量
         for (int i = 0; i < SIZE; i++) {
             for (int j = 0; j < SIZE; j++) {
@@ -79,10 +79,11 @@ public class Board {
         if (totalRemoved > 0) {
             removeRandomOpponentPieces(player, totalRemoved); // 在所有行都清除完毕后移除对手棋子
         }
+        return totalRemoved - 4;
     }
 
     private int clearLine(String player, int startX, int startY, int stepX, int stepY) {
-        int count =0;
+        int count = 0;
         for (int i = 0; ; i++) {
             int x = startX + i * stepX;
             int y = startY + i * stepY;
@@ -97,19 +98,32 @@ public class Board {
     }
 
     private void removeRandomOpponentPieces(String player, int count) {
-        List<int[]> opponentPieces = new ArrayList<>();
+        List<String> opponents = new ArrayList<>();
+        // 获取所有非获胜玩家的名字
         for (int row = 0; row < SIZE; row++) {
             for (int col = 0; col < SIZE; col++) {
-                if (board[row][col] != null && !board[row][col].equals(player)) {
-                    opponentPieces.add(new int[]{row, col});
+                if (board[row][col] != null && !board[row][col].equals(player) && !opponents.contains(board[row][col])) {
+                    opponents.add(board[row][col]);
                 }
             }
         }
+
         Random random = new Random();
-        for (int i = 0; i < count && !opponentPieces.isEmpty(); i++) {
-            int[] piece = opponentPieces.remove(random.nextInt(opponentPieces.size()));
-            board[piece[0]][piece[1]] = null;
+        // 遍历每个对手玩家
+        for (String opponent : opponents) {
+            List<int[]> opponentPieces = new ArrayList<>();
+            for (int row = 0; row < SIZE; row++) {
+                for (int col = 0; col < SIZE; col++) {
+                    if (board[row][col] != null && board[row][col].equals(opponent)) {
+                        opponentPieces.add(new int[]{row, col});
+                    }
+                }
+            }
+
+            for (int i = 0; i < count && !opponentPieces.isEmpty(); i++) {
+                int[] piece = opponentPieces.remove(random.nextInt(opponentPieces.size()));
+                board[piece[0]][piece[1]] = null;
+            }
         }
     }
-
 }

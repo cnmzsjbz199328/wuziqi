@@ -1,23 +1,53 @@
 package com.tang0488;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.TestPropertySource;
+import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.*;
+
+@SpringBootTest
+@TestPropertySource(locations = "classpath:application-test.properties")
 public class GameTest {
 
-    @Test
-    public void testMakeMove() {
-        Game game = new Game();
-        game.makeMove(0, 0); // Player1
-        game.makeMove(1, 0); // Player2
-        game.makeMove(0, 1); // Player1
-        game.makeMove(1, 1); // Player2
-        game.makeMove(0, 2); // Player1
-        game.makeMove(1, 2); // Player2
-        game.makeMove(0, 3); // Player1
-        game.makeMove(1, 3); // Player2
-        game.makeMove(0, 4); // Player1
+    @Autowired
+    private Game game;
 
-        assertTrue(game.getBoard().checkWin("Player1"));
+    @Autowired
+    private UserRepository userRepository;
+
+    @BeforeEach
+    public void setUp() {
+        userRepository.deleteAll();
+        userRepository.save(new User("admin1", false));
+        userRepository.save(new User("player12", false));
+        userRepository.save(new User("player21", true));
+    }
+
+    @Test
+    public void testInitializePlayers() {
+        game.initializePlayers();
+        List<User> players = game.getPlayers();
+        assertNotNull(players);
+        assertFalse(players.isEmpty());
+
+        // 进一步检查每个玩家的数据是否正确
+        assertEquals(3, players.size());
+
+        User fixedPlayer = players.get(0);
+        assertEquals("admin", fixedPlayer.getName());
+        assertFalse(fixedPlayer.isAutomated());
+
+        User player1 = players.get(1);
+        assertEquals("player1", player1.getName());
+        assertFalse(player1.isAutomated());
+
+        User player2 = players.get(2);
+        assertEquals("player2", player2.getName());
+        assertTrue(player2.isAutomated());
     }
 }

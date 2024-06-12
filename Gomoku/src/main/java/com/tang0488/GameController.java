@@ -1,80 +1,110 @@
 package com.tang0488;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.messaging.core.AbstractDestinationResolvingMessagingTemplate;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
-
+import java.util.List;
+import java.util.stream.Collectors;
 @RestController
-@Controller
 @RequestMapping("/game")
 public class GameController {
 
-	private final Game game;
+    private final Game game;
+    private final RandomMoveStrategy randomMoveStrategy;
+    private final SmartMoveStrategy smartMoveStrategy;
+    private final UserPool userPool;
+    private final SimpMessagingTemplate messagingTemplate;
+    @Autowired
+    public GameController(Game game, RandomMoveStrategy randomMoveStrategy, SmartMoveStrategy smartMoveStrategy, UserPool userPool, SimpMessagingTemplate messagingTemplate) {
+        this.game = game;
+        this.randomMoveStrategy = randomMoveStrategy;
+        this.smartMoveStrategy = smartMoveStrategy;
+        this.userPool = userPool;
+        this.messagingTemplate = messagingTemplate;
+    }
 
+    @GetMapping
+    public String getGame(Model model) {
+        model.addAttribute("game", game);
+        return "index";
+    }
 
-	@Autowired
-	public GameController(Game game) {
-		this.game = game;
-	}
+    @GetMapping("/players")
+    @ResponseBody
+    public List<String> getPlayers() {
+        return userPool.getUsers().stream()
+                .map(User::getName)
+                .collect(Collectors.toList());
+    }
 
-	@GetMapping
-	public String getGame(Model model) {
-		model.addAttribute("game", game);
-		return "index";
-	}
-	@PostMapping("/move")
-	@ResponseBody
-	public Map<String, Object> processMove(@RequestBody Map<String, Integer> move) {
-		int row = move.get("row");
-		int col = move.get("col");
-		Map<String, Object> response = new HashMap<>();
-		boolean moveMade = game.makeMove(row, col);
-		response.put("moveMade", moveMade);
-		response.put("currentPlayer", game.getCurrentPlayer());
-		response.put("board", game.getBoard().getBoard());
-		if (moveMade) {
-			if (game.checkWin(game.getCurrentPlayer())) { // 修正调用方法
-				response.put("winner", game.getCurrentPlayer());
-				game.getBoard().clearWinningLine(game.getCurrentPlayer());
-				game.switchPlayer();
-			} else {
-				game.switchPlayer();
-				game.getMoveStrategy().makeMove(game.getBoard(), game.getCurrentPlayer()); // 添加随机玩家移动
-				response.put("board", game.getBoard().getBoard());
-				if (game.checkWin(game.getCurrentPlayer())) { // 再次检查当前玩家是否胜利
-					response.put("winner", game.getCurrentPlayer());
-					game.getBoard().clearWinningLine(game.getCurrentPlayer());
-					game.switchPlayer();
-				} else {
-					game.switchPlayer();
-				}
-			}
-		}
-		return response;
-	}
+    @PostMapping("/move")
+    @ResponseBody
+    public Map<String, Object> processMove(@RequestBody Map<String, Integer> move) {
+        int row = move.get("row");
+        int col = move.get("col");
+        Map<String, Object> response = new HashMap<>();
+        boolean moveMade = game.makeMove(row, col);
+        response.put("moveMade", moveMade);
+        response.put("currentPlayer", game.getCurrentPlayer());
+        response.put("board", game.getBoard().getBoard());
+        if (moveMade) {
+            if (game.checkWin(game.getCurrentPlayer())) { // 修正调用方法
+                response.put("winner", game.getCurrentPlayer());
+                game.getBoard().clearWinningLine(game.getCurrentPlayer());
+            }
+            game.nextPlayer();
+            // 添加策略玩家的判断和执行策略
+            if (game.getCurrentPlayer().equals("G")) {  // 假设策略玩家的用户名为"G"
+                game.getMoveStrategy().makeMove(game.getBoard(), game.getCurrentPlayer());
+                response.put("board", game.getBoard().getBoard());
+                if (game.checkWin(game.getCurrentPlayer())) {
+                    response.put("winner", game.getCurrentPlayer());
+                    game.getBoard().clearWinningLine(game.getCurrentPlayer());
+                }
+                game.nextPlayer();
+            }
+        }
+        response.put("users", userPool.getUsers()); // 修改点6：添加用户列表到响应
+        return response;
 
-	public static class MoveRequest {
-		private int row;
-		private int col;
+    }
+    @PostMapping("/strategy")
+    @ResponseBody
+    public void setStrategy(@RequestParam String strategy) {
+        if ("random".equalsIgnoreCase(strategy)) {
+            game.setMoveStrategy(randomMoveStrategy);
+        } else if ("smart".equalsIgnoreCase(strategy)) {
+            game.setMoveStrategy(smartMoveStrategy);
+        }
+    }
 
-		public int getRow() {
-			return row;
-		}
+    @PostMapping("/register")
+    @ResponseBody
+    public Map<String, Object> registerPlayer(@RequestParam String username) {
+        Map<String, Object> response = new HashMap<>();
+        if (userPool.findByUsername(username) != null) {
+            response.put("message", "Username already taken.");
+        }else {
+            User newUser = new User();
+            newUser.setName(username);
+            //game.initializePlayers();
+            userPool.addUser(newUser);
+            messagingTemplate.convertAndSend("/topic/users", userPool.getUsers());
+            response.put("message", "Player registered successfully.");
+        }
+        response.put("users", userPool.getUsers()); // 修改点7：添加用户列表到响应
+        return response;
+    }
 
-		public void setRow(int row) {
-			this.row = row;
-		}
-
-		public int getCol() {
-			return col;
-		}
-
-		public void setCol(int col) {
-			this.col = col;
-		}
-	}
+    @GetMapping("/users")
+    @ResponseBody
+    public List<User> getUsers() {
+        return userPool.getUsers(); // 修改点8：返回用户列表
+    }
 }
