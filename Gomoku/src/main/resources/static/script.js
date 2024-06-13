@@ -35,8 +35,31 @@ function makeMove(row, col) {
         if (data.winner) {
             alert(data.winner + ' wins!');
             updateUsers(data.users);
+            if (data.poem) {
+                displayPoem(data.poem);  // Display the poem
+            }
         }
     });
+}
+
+function displayPoem(poem) {
+    const gameTitle = document.getElementById('game-title');
+    gameTitle.style.display = 'none'; // Hide game title
+    const poemSection = document.getElementById('poem-section');
+    const poemElement = document.getElementById('poem');
+    poemElement.textContent = poem; // Adjust based on actual data structure
+    poemSection.style.display = 'block';
+    poemSection.style.width = '0'; // Reset width before animation
+    poemSection.classList.add('typewriter'); // Add typewriter effect
+
+    // Reset animation by removing and re-adding the class
+    poemSection.classList.remove('typewriter');
+    void poemSection.offsetWidth; // Trigger reflow
+    poemSection.classList.add('typewriter');
+
+    console.log(poem); // 添加这一行
+    poemElement.textContent = poem;
+
 }
 
 function updateBoard(board) {
@@ -95,11 +118,11 @@ window.onload = function() {
 
 function createBoard() {
     const table = document.getElementById('board');
-    for (let i = 0; i < 15; i++) {
-        let row = table.insertRow();
-        for (let j = 0; j < 15; j++) {
-            let cell = row.insertCell();
-            cell.onclick = () => makeMove(i, j);
-        }
-    }
-}
+    for (let i= 0; i < 15; i++) {
+       let row = table.insertRow();
+       for (let j = 0; j < 15; j++) {
+       let cell = row.insertCell();
+       cell.onclick = () => makeMove(i, j);
+                      }
+                  }
+              }

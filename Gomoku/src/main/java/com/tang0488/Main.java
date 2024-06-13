@@ -1,5 +1,8 @@
 package com.tang0488;
 
+import com.tang0488.Poem.Poem;
+import com.tang0488.Poem.PoemService;
+
 public class Main {
 
     public static void main(String[] args) {
@@ -7,7 +10,8 @@ public class Main {
         UserPool userPool = new UserPool();
         RandomMoveStrategy randomMoveStrategy = new RandomMoveStrategy();
         SmartMoveStrategy smartMoveStrategy = new SmartMoveStrategy(randomMoveStrategy);
-        Game game = new Game(userPool, randomMoveStrategy, smartMoveStrategy);
+        PoemService poemService = new PoemService();
+        Game game = new Game(userPool, randomMoveStrategy, smartMoveStrategy,poemService);
 
         // 添加模拟玩家
         userPool.addUser(new User("Player1"));

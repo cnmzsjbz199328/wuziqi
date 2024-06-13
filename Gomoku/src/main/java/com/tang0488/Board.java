@@ -1,8 +1,6 @@
 package com.tang0488;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
+import java.util.*;
 
 public class Board {
     public static final int SIZE = 15;
@@ -59,51 +57,76 @@ public class Board {
     }
 
     public int clearWinningLine(String player) {
-        int totalRemoved = 0; // 用于记录被移除的棋子数量   
+        Set<Point> toClear = new HashSet<>();  // Using a set to avoid duplicate removals
+
+        // Check all possible lines from every board position
         for (int i = 0; i < SIZE; i++) {
             for (int j = 0; j < SIZE; j++) {
-                if (checkLine(player, i, j, 1, 0) >= WIN_COUNT) { // 水平
-                    totalRemoved += clearLine(player, i, j, 1, 0);
-                }
-                if (checkLine(player, i, j, 0, 1) >= WIN_COUNT) { // 垂直
-                    totalRemoved += clearLine(player, i, j, 0, 1);
-                }
-                if (checkLine(player, i, j, 1, 1) >= WIN_COUNT) { // 主对角线
-                    totalRemoved += clearLine(player, i, j, 1, 1);
-                }
-                if (checkLine(player, i, j, 1, -1) >= WIN_COUNT) { // 副对角线
-                    totalRemoved += clearLine(player, i, j, 1, -1);
-                }
+                collectClearableLines(player, i, j, 1, 0, toClear);  // Horizontal
+                collectClearableLines(player, i, j, 0, 1, toClear);  // Vertical
+                collectClearableLines(player, i, j, 1, 1, toClear);  // Main diagonal
+                collectClearableLines(player, i, j, 1, -1, toClear); // Anti-diagonal
             }
         }
+
+        // Remove all collected points and count them
+        int totalRemoved = 0;
+        for (Point p : toClear) {
+            if (board[p.x][p.y] != null) {
+                board[p.x][p.y] = null;
+                totalRemoved++;
+            }
+        }
+
+        // Optionally adjust opponent piece removal as needed
         if (totalRemoved > 0) {
-            removeRandomOpponentPieces(player, totalRemoved); // 在所有行都清除完毕后移除对手棋子
+            removeRandomOpponentPieces(player, totalRemoved);
         }
-        return totalRemoved - 4;
+
+        return totalRemoved-4;  // You may adjust this return value based on your scoring rules
     }
 
-    private int clearLine(String player, int startX, int startY, int stepX, int stepY) {
-        int count = 0;
-        for (int i = 0; ; i++) {
-            int x = startX + i * stepX;
-            int y = startY + i * stepY;
-            if (x >= 0 && x < SIZE && y >= 0 && y < SIZE && player.equals(board[x][y])) {
-                board[x][y] = null;
-                count++;
-            } else {
-                break;
+    private void collectClearableLines(String player, int startX, int startY, int stepX, int stepY, Set<Point> toClear) {
+        if (checkLine(player, startX, startY, stepX, stepY) >= WIN_COUNT) {
+            for (int i = 0; i < WIN_COUNT; i++) {
+                int x = startX + i * stepX;
+                int y = startY + i * stepY;
+                if (x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
+                    toClear.add(new Point(x, y));
+                }
             }
         }
-        return count;
     }
 
+        private class Point {
+            int x, y;
+
+            Point(int x, int y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o) return true;
+                if (o == null || getClass() != o.getClass()) return false;
+                Point point = (Point) o;
+                return x == point.x && y == point.y;
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(x, y);
+            }
+        }
     private void removeRandomOpponentPieces(String player, int count) {
         List<String> opponents = new ArrayList<>();
         // 获取所有非获胜玩家的名字
         for (int row = 0; row < SIZE; row++) {
             for (int col = 0; col < SIZE; col++) {
-                if (board[row][col] != null && !board[row][col].equals(player) && !opponents.contains(board[row][col])) {
-                    opponents.add(board[row][col]);
+                String current = board[row][col];
+                if (current != null && !current.equals(player) && !opponents.contains(current)) {
+                    opponents.add(current);
                 }
             }
         }

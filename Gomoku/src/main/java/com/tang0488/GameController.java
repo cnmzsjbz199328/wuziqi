@@ -1,5 +1,7 @@
 package com.tang0488;
 
+import com.tang0488.Poem.Poem;
+import com.tang0488.Poem.PoemService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.core.AbstractDestinationResolvingMessagingTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -20,13 +22,15 @@ public class GameController {
     private final SmartMoveStrategy smartMoveStrategy;
     private final UserPool userPool;
     private final SimpMessagingTemplate messagingTemplate;
+    private PoemService poemService;
     @Autowired
-    public GameController(Game game, RandomMoveStrategy randomMoveStrategy, SmartMoveStrategy smartMoveStrategy, UserPool userPool, SimpMessagingTemplate messagingTemplate) {
+    public GameController(Game game, RandomMoveStrategy randomMoveStrategy, SmartMoveStrategy smartMoveStrategy, UserPool userPool, SimpMessagingTemplate messagingTemplate, PoemService poemService) {
         this.game = game;
         this.randomMoveStrategy = randomMoveStrategy;
         this.smartMoveStrategy = smartMoveStrategy;
         this.userPool = userPool;
         this.messagingTemplate = messagingTemplate;
+        this.poemService = poemService;
     }
 
     @GetMapping
@@ -34,7 +38,10 @@ public class GameController {
         model.addAttribute("game", game);
         return "index";
     }
-
+    @GetMapping("/random-poem")
+    public Poem getRandomPoem() {
+        return poemService.getRandomPoem();
+    }
     @GetMapping("/players")
     @ResponseBody
     public List<String> getPlayers() {
@@ -61,6 +68,7 @@ public class GameController {
                 currentUser.addScore(scoreIncrement);
                 response.put("winner", game.getCurrentPlayer());
                 response.put("score", currentUser.getScore());  // 更新分数
+                response.put("poem", poemService.getRandomPoem().getLines());// Send poem when player wins
             }
             game.nextPlayer();
             // 添加策略玩家的判断和执行策略
@@ -73,6 +81,7 @@ public class GameController {
                     currentUser.addScore(scoreIncrement);
                     response.put("winner", game.getCurrentPlayer());
                     response.put("score", currentUser.getScore());
+                    response.put("poem", poemService.RandomWin());  // Ensure this returns a Poem object with a content attribute
                 }
                 game.nextPlayer();
             }

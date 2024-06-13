@@ -14,8 +14,8 @@ body {
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     border-radius: 10px;
     overflow: hidden;
-    width: 80%;
-    max-width: 1200px;
+    width: 90%;
+    max-width: 1400px;
 }
 
 header {
@@ -97,4 +97,30 @@ button:hover {
     margin-bottom: 5px;
     padding: 10px;
     border-radius: 5px;
+}
+
+#poem-section {
+    white-space: nowrap;
+    overflow: hidden;
+    border-right: .15em solid orange; /* Cursor-like solid line */
+    width: 0;
+    margin: 20px 0;
+    padding: 10px;
+    background-color: #f3f3f3;
+    border: 1px solid #ccc;
+    text-align: center;
+}
+
+.typewriter {
+    animation: typing 3.5s steps(40, end), blink-caret .75s step-end infinite;
+}
+
+@keyframes typing {
+    from { width: 0 }
+    to { width: 100% }
+}
+
+@keyframes blink-caret {
+    from, to { border-color: transparent }
+    50% { border-color: orange }
 }

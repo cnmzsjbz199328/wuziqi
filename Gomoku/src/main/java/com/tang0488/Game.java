@@ -1,5 +1,6 @@
 package com.tang0488;
 
+import com.tang0488.Poem.PoemService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import lombok.Getter;
@@ -22,15 +23,17 @@ public class Game {
     private Stack<int[]> moveHistory;
     private List<User> players;
     private int currentPlayerIndex;
+    private PoemService poemService;
 
 
     @Autowired
-    public Game(UserPool userPool,RandomMoveStrategy randomMoveStrategy, SmartMoveStrategy smartMoveStrategy) {
+    public Game(UserPool userPool,RandomMoveStrategy randomMoveStrategy, SmartMoveStrategy smartMoveStrategy,PoemService poemService) {
         this.userPool = userPool;
         this.board = new Board();
         this.scanner = new Scanner(System.in);
         this.moveHistory = new Stack<>();
         this.moveStrategy = smartMoveStrategy; // 默认策略
+        this.poemService = poemService;
         initializePlayers();
     }
     @PostConstruct
@@ -67,6 +70,7 @@ public class Game {
                             currentPlayer.addScore(clearedCount);
                             System.out.println(currentPlayer.getName() + " Score: " + currentPlayer.getScore());
                             //board.clearWinningLine(currentPlayer.getName());
+                            System.out.println(poemService.RandomWin());
                             printBoard();
                         }
                         nextPlayer();
@@ -81,6 +85,7 @@ public class Game {
                     int clearedCount = board.clearWinningLine(currentPlayer.getName());
                     currentPlayer.addScore(clearedCount);
                     System.out.println(currentPlayer.getName() + " Score: " + currentPlayer.getScore());
+                    System.out.println(poemService.RandomWin());
                     printBoard();
                 }
                 nextPlayer();
