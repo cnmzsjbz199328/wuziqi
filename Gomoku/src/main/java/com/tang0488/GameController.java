@@ -48,6 +48,7 @@ public class GameController {
     public Map<String, Object> processMove(@RequestBody Map<String, Integer> move) {
         int row = move.get("row");
         int col = move.get("col");
+//        User currentUser = game.getCurrentPlayer(); // 获取当前用户
         Map<String, Object> response = new HashMap<>();
         boolean moveMade = game.makeMove(row, col);
         response.put("moveMade", moveMade);
@@ -55,8 +56,11 @@ public class GameController {
         response.put("board", game.getBoard().getBoard());
         if (moveMade) {
             if (game.checkWin(game.getCurrentPlayer())) { // 修正调用方法
+                int scoreIncrement = game.getBoard().clearWinningLine(game.getCurrentPlayer());
+                User currentUser = userPool.findByUsername(game.getCurrentPlayer());
+                currentUser.addScore(scoreIncrement);
                 response.put("winner", game.getCurrentPlayer());
-                game.getBoard().clearWinningLine(game.getCurrentPlayer());
+                response.put("score", currentUser.getScore());  // 更新分数
             }
             game.nextPlayer();
             // 添加策略玩家的判断和执行策略
@@ -64,8 +68,11 @@ public class GameController {
                 game.getMoveStrategy().makeMove(game.getBoard(), game.getCurrentPlayer());
                 response.put("board", game.getBoard().getBoard());
                 if (game.checkWin(game.getCurrentPlayer())) {
+                    int scoreIncrement = game.getBoard().clearWinningLine(game.getCurrentPlayer());
+                    User currentUser = userPool.findByUsername(game.getCurrentPlayer());
+                    currentUser.addScore(scoreIncrement);
                     response.put("winner", game.getCurrentPlayer());
-                    game.getBoard().clearWinningLine(game.getCurrentPlayer());
+                    response.put("score", currentUser.getScore());
                 }
                 game.nextPlayer();
             }

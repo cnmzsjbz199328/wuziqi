@@ -1,53 +1,29 @@
 package com.tang0488;
-
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.context.TestPropertySource;
-import java.util.List;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import static org.junit.jupiter.api.Assertions.*;
-
-@SpringBootTest
-@TestPropertySource(locations = "classpath:application-test.properties")
 public class GameTest {
 
-    @Autowired
-    private Game game;
-
-    @Autowired
-    private UserRepository userRepository;
-
-    @BeforeEach
-    public void setUp() {
-        userRepository.deleteAll();
-        userRepository.save(new User("admin1", false));
-        userRepository.save(new User("player12", false));
-        userRepository.save(new User("player21", true));
-    }
-
     @Test
-    public void testInitializePlayers() {
-        game.initializePlayers();
-        List<User> players = game.getPlayers();
-        assertNotNull(players);
-        assertFalse(players.isEmpty());
+    public void testScoreAfterWin() {
+        UserPool userPool = new UserPool();
+        User user = new User("TestPlayer");
+        userPool.addUser(user);
+        Board board = new Board();
+        RandomMoveStrategy randomMoveStrategy = new RandomMoveStrategy();
+        SmartMoveStrategy smartMoveStrategy = new SmartMoveStrategy(randomMoveStrategy);
+        Game game = new Game(userPool, randomMoveStrategy, smartMoveStrategy);
 
-        // 进一步检查每个玩家的数据是否正确
-        assertEquals(3, players.size());
+        // 模拟一次游戏中玩家赢得比赛
+        for (int col = 0; col < 5; col++) {
+            board.addMove(0, col, user.getName());
+        }
+        if (board.checkWin(user.getName())) {
+            int clearedCount = board.clearWinningLine(user.getName());
+            user.addScore(clearedCount); // 确认分数增加操作是否正确执行
+        }
 
-        User fixedPlayer = players.get(0);
-        assertEquals("admin", fixedPlayer.getName());
-        assertFalse(fixedPlayer.isAutomated());
-
-        User player1 = players.get(1);
-        assertEquals("player1", player1.getName());
-        assertFalse(player1.isAutomated());
-
-        User player2 = players.get(2);
-        assertEquals("player2", player2.getName());
-        assertTrue(player2.isAutomated());
+        // 期待的分数，假设每清除5个连珠得1分
+        assertEquals(1, user.getScore(), "Score should be incremented correctly after winning.");
     }
 }

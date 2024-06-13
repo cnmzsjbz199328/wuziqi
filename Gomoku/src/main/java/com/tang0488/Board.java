@@ -59,7 +59,7 @@ public class Board {
     }
 
     public int clearWinningLine(String player) {
-        int totalRemoved = 0; // 用于记录被移除的棋子数量
+        int totalRemoved = 0; // 用于记录被移除的棋子数量   
         for (int i = 0; i < SIZE; i++) {
             for (int j = 0; j < SIZE; j++) {
                 if (checkLine(player, i, j, 1, 0) >= WIN_COUNT) { // 水平

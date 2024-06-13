@@ -16,7 +16,7 @@ function updateUsers(users) {
     usersList.innerHTML = '';
     users.forEach(function(user) {
         var li = document.createElement('li');
-        li.appendChild(document.createTextNode(user.name + " joins " + user.score));
+        li.textContent = user.name + " - Score: " + user.score;
         usersList.appendChild(li);
     });
 }
