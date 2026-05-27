@@ -4,132 +4,93 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository layout
 
-The repository root contains a single Spring Boot application under `Gomoku/`. There is no monorepo or multi-project Gradle setup — the working directory for almost every command is `Gomoku/`.
-
 ```
 wuziqi/
-├── Gomoku/                    # Spring Boot app (Java 17, Gradle)
-│   ├── build.gradle
-│   ├── src/main/java/com/tang0488/
-│   ├── src/main/resources/    # application.properties, static/, templates/, schema.sql, data.sql
-│   └── src/test/java/com/tang0488/
-└── .github/workflows/deploy.yml
+├── apps/gomoku-cf/      # ACTIVE: Cloudflare Workers rewrite (React + Vite + Hono + DO + KV)
+├── Gomoku/              # REFERENCE ONLY: trimmed Java snippets for game rules + AI
+├── REFACTOR_PLAN.md     # 6-milestone plan for the rewrite, KV/DO schema, ADRs
+└── CLAUDE.md            # this file
 ```
 
-## Common commands
+**All active development happens in `apps/gomoku-cf/`.** The original Spring Boot project under `Gomoku/` has been pared down to 9 Java files that are kept purely as a reference for game logic and AI heuristics. There is no Gradle build, no Spring runtime, no tests, no CI on the Java side — none of it should be run, only read.
 
-All commands run from `Gomoku/`:
+## `Gomoku/` — what's left and why
 
-```bash
-./gradlew build                              # compile + run tests + assemble jar
-./gradlew bootRun                            # start web app on http://localhost:8080
-./gradlew test                               # run all JUnit 5 tests
-./gradlew test --tests BoardTest             # single test class
-./gradlew test --tests BoardTest.testCheckWin # single test method
-./gradlew clean build -x test                # build skipping tests
-```
+| File | Why it's kept |
+|---|---|
+| `Board.java` | Source of truth for the non-standard "clear winning line + randomly remove opponent stones" rule. The TS port in `apps/gomoku-cf/src/worker/game/board.ts` was derived from this. |
+| `Game.java` | Reference for the main loop: place → check 5-in-a-row → clear + disrupt → score → next player. Spring-coupled and won't compile in isolation, but the flow is what matters. |
+| `MoveStrategy.java` + `RandomMoveStrategy.java` + `SmartMoveStrategy.java` | AI strategies the TS `ai.ts` was based on. The original `SmartMoveStrategy` had a single-direction `checkLine` bug — the TS version fixes it. |
+| `User.java` + `UserPool.java` | Data shape for users (`username` + `score`). Persistence in the original was a no-op; in the rewrite we use KV. |
+| `Poem/Poem.java` + `Poem/PoemService.java` | Has the inlined poem strings used as the win-screen flourish. M5 will copy these into a KV seed. |
 
-The H2 console (when the app is running) is exposed at `http://localhost:8080/h2-console` with `jdbc:h2:mem:testdb`, user `sa`, password `password` (see `application.properties`). The DB is in-memory and reset on every restart.
+Everything else from the original tree (`build.gradle`, `gradlew`, Spring `*Application` / `*Controller` / `*Config` classes, `Main.java`, `GameMove.java`, the `resources/` directory with `schema.sql` / `data.sql` / Liquibase changelog / Thymeleaf templates / static HTML+JS, the `src/test/` directory, the dead Docker+Render GitHub workflow, and Windows `.lnk` shortcuts) has been deleted from this branch. The `master`/`main` branch still has them if you need to dig.
 
-There is no lint/format tool configured — don't fabricate `./gradlew check` workflows beyond what Spring Boot's plugin provides by default.
+## Non-standard Gomoku rules (the product's differentiator)
 
-## Two entry points (important)
+A 5-in-a-row is **not the end of the game**; it's a scoring + disrupt event:
 
-The code has **two parallel ways to run the game**, and they share most domain classes:
+- All of the winning player's stones that belong to any 5-in-a-row (overlapping/extended runs are de-duplicated) are removed from the board.
+- Then, for each opposing color present on the board, `clearedSelf` of their stones are removed at random.
+- Score awarded = `max(0, clearedSelf - 4)`. A single 5-run scores 1; a 6-run (one stone of overlap with the next position) scores 2; a fork that unions 9 unique stones scores 5.
+- Play continues until a participant resigns or ends the round.
 
-1. **`GomokuApplication.java`** — the real Spring Boot web app (`@SpringBootApplication`). This is what `bootRun` starts. The browser plays against the Spring-managed `Game` singleton via REST + STOMP/WebSocket.
-2. **`Main.java`** — a standalone `main()` that wires the same classes manually (`new UserPool()`, `new Game(...)`) and runs a console-based REPL via `Game.start()`, which reads from `System.in` with a `Scanner`. Not invoked by Spring; useful for local debugging only.
+Keep this rule intact unless the user explicitly asks otherwise — it was previously flagged as a bug, but the user has confirmed it's the product's core differentiator.
 
-When changing domain classes (`Game`, `Board`, `UserPool`, strategies), check both paths still compile. `Game.start()`'s console loop is dead code in production but referenced by `Main`.
+## `apps/gomoku-cf/` — the active project
 
-## Architecture: singleton game with hybrid REST + WebSocket
-
-The runtime design is unusual and easy to misread:
-
-- **`Game` is a Spring singleton `@Component`** with mutable fields (`board`, `currentPlayerIndex`, `moveHistory`). There is exactly **one game instance for the entire application** — no per-session or per-room state. Two browsers hitting `/game/move` mutate the same board.
-- **`UserPool` is also a singleton** with a plain `ArrayList<User>` (not thread-safe). It seeds itself with a single user `"G"` in its constructor — this is the **hardcoded AI identifier** (`GameController.java:75` checks `equals("G")` to decide whether to invoke the AI strategy after a human move).
-- **`User` is NOT a JPA entity** despite the `jakarta.persistence` import — there are no `@Entity`/`@Table` annotations, no repository, and no persistence. `schema.sql` / `data.sql` / `db/changelog/db.changelog-master.yaml` all reference a `users` table that is created by Spring but never read or written by application code. Treat the DB layer as effectively dead.
-- **REST endpoints under `/game/*`** (in `GameController`) handle moves, registration, strategy selection. They return `Map<String, Object>` JSON blobs (no DTOs).
-- **WebSocket / STOMP** is configured (`WebSocketConfig`) with broker prefix `/topic` and endpoint `/ws` (SockJS). `GameController` broadcasts the user list to `/topic/users` after registration, but moves themselves go through plain REST POSTs, not WebSocket — the front-end polls/posts and uses WS only for the user list.
-- **Strategy pattern**: `MoveStrategy` interface, `RandomMoveStrategy` and `SmartMoveStrategy` (both `@Component`s). `SmartMoveStrategy` takes `RandomMoveStrategy` as a fallback for ties. `Game.moveStrategy` defaults to `SmartMoveStrategy` and is switched via `POST /game/strategy?strategy=random|smart`.
-
-## Non-standard Gomoku rules (intentional, not bugs)
-
-The game does not stop on a win — instead:
-
-- `Board.clearWinningLine(player)` removes the 5 winning stones AND then calls `removeRandomOpponentPieces` to delete additional stones belonging to opponents at random. Play continues on the modified board.
-- It returns `totalRemoved - 4` as the score increment (so a single 5-in-a-row scores 1). Anywhere "score" appears, this is the source.
-- This is deliberate — keep the behavior unless the user asks otherwise.
-
-## Frontend
-
-`src/main/resources/static/` holds plain `index.html` + `script.js` + `style.css` — no build step, no framework. JS uses SockJS + STOMP client loaded from CDN. The "winning poem" animation in `style.css` uses CSS typewriter `steps(40, end)` regardless of poem length.
-
-## Test suite caveats
-
-- Several tests under `src/test/java/com/tang0488/` are partially commented out (`UserRepositoryTest`, `WebSocketIntegrationTest`).
-- `GameControllerTest` posts to `/move` rather than `/game/move` — the path is wrong and the test does not actually exercise the controller. Fix the path if touching that test.
-- `Game`'s constructor requires `PoemService`; any new test that builds `Game` directly must pass one (or a mock).
-
-## Junk / dead files to ignore (or delete if asked)
-
-These exist in the tree but are not part of the build:
-- `Gomoku/src/main/java/com/tang0488/xxx.java`
-- `Gomoku/src/main/java/com/tang0488/test.txt`
-- `Gomoku - Shortcut.lnk`, `Gomoku/src - Shortcut.lnk` (Windows shortcuts)
-- `Gomoku/src/main/resources/templates/data.sql` (duplicate of `resources/data.sql`, in the wrong directory)
-- `db/changelog/db.changelog-master.yaml` (Liquibase changelog, but Liquibase is not on the classpath)
-
-## CI / deploy
-
-`.github/workflows/deploy.yml` references placeholder Docker Hub credentials (`yourusername/yourappname`) and a stub `curl` to Render — it has never been a working pipeline. Do not assume CI is green; treat the workflow file as a draft.
-
-## Active refactor
-
-The branch `rewrite/serverless` is the in-progress rewrite to Cloudflare Workers. **All new development happens in `apps/gomoku-cf/`**; the Java code in `Gomoku/` is now read-only reference for game rules and AI strategy.
-
-See `REFACTOR_PLAN.md` (project root) for the full 6-milestone plan, KV/DO schema, and ADRs.
-
-### New project: `apps/gomoku-cf/`
-
-Stack: **React 19 + Vite 6 + TypeScript + Tailwind v4** (client), **Hono 4 + Workers + Durable Objects (SQLite) + KV** (backend), **Zod** for schema validation, **`@cloudflare/vite-plugin`** for full-stack dev.
+Stack: **React 19 + Vite 6 + TypeScript + Tailwind v4** (client), **Hono 4 + Workers + Durable Objects (SQLite) + KV** (backend), **Zod** for schema validation, **`@cloudflare/vite-plugin`** for full-stack dev. **Vitest** for unit tests with an in-memory KV fake.
 
 ```
 apps/gomoku-cf/
 ├── src/
-│   ├── react-app/      # Vite-bundled React frontend
+│   ├── react-app/           # Vite-bundled React frontend
 │   │   ├── main.tsx, App.tsx, index.css   # entry + Tailwind import
-│   │   ├── pages/, components/, hooks/, lib/   # populated per-milestone
-│   ├── worker/         # Cloudflare Worker
-│   │   ├── index.ts    # Hono entry, exports GameRoom DO
-│   │   ├── routes/     # /api/* handlers (one file per resource)
-│   │   ├── do/GameRoom.ts   # the per-room Durable Object
-│   │   ├── game/       # pure functions: board, ai, rules
-│   │   └── kv/         # user / leaderboard / poems KV adapters
+│   │   └── pages/, components/, hooks/, lib/   # populated per-milestone
+│   ├── worker/              # Cloudflare Worker
+│   │   ├── index.ts         # Hono entry, exports GameRoom DO, mounts routes
+│   │   ├── routes/          # /api/* handlers (one file per resource)
+│   │   ├── do/GameRoom.ts   # the per-room Durable Object (Hibernation API)
+│   │   ├── game/            # pure functions: board.ts, ai.ts (+ .test.ts)
+│   │   └── kv/              # users.ts, types.ts (+ users.test.ts)
 │   └── shared/protocol.ts   # Zod schemas + types for ALL client↔server traffic
-├── wrangler.jsonc      # bindings: KV (placeholder id), GAME_ROOM DO, ASSETS
-├── vite.config.ts      # react() + tailwindcss() + cloudflare() plugins
+├── wrangler.jsonc           # bindings: KV (placeholder id), GAME_ROOM DO, ASSETS
+├── vite.config.ts           # react() + tailwindcss() + cloudflare() plugins
+├── vitest.config.ts
 └── worker-configuration.d.ts   # generated by `wrangler types`, do not edit
 ```
 
-### Working in `apps/gomoku-cf/`
-
-All commands run from `apps/gomoku-cf/`:
+### Commands (all run from `apps/gomoku-cf/`)
 
 ```bash
-npm run dev      # Vite dev server on :5173, full-stack hot reload (client + worker)
-npm run build    # tsc -b && vite build → dist/client + dist/gomoku_cf
-npm run check    # build + `wrangler deploy --dry-run` — pre-flight before deploy
-npm run deploy   # wrangler deploy (requires `wrangler login` + real KV id)
-npm run lint     # ESLint
+npm run dev          # Vite + Workers dev server on :5173, full-stack HMR
+npm test             # Vitest run-once (49 tests at M2)
+npm run test:watch   # Vitest watch
+npm run build        # tsc -b && vite build → dist/client + dist/gomoku_cf
+npm run check        # build + `wrangler deploy --dry-run` — pre-flight before deploy
+npm run deploy       # wrangler deploy (needs `wrangler login` + real KV id)
+npm run lint         # ESLint
 npm run cf-typegen   # regenerate worker-configuration.d.ts after wrangler.jsonc changes
 ```
 
 ### Critical conventions
 
 - **`src/shared/protocol.ts` is the only source of truth for cross-boundary types.** Both worker and react-app import from it. Adding a new WS message or REST endpoint? Add a Zod schema here first.
+- **`UsernameSchema`: 3-16 chars, `[a-zA-Z0-9_]` only.** CJK was considered and dropped — non-ASCII round-tripping through URLs, KV keys, and shell scripts caused bugs without enough product value.
 - **Durable Object: SQLite-backed, Hibernation API.** `GameRoom.fetch` accepts WS upgrades via `ctx.acceptWebSocket(server)` — never call `ws.accept()` (that disables hibernation and burns GB-s).
 - **KV binding ID `0000000000000000000000000000aaaa` in `wrangler.jsonc` is a placeholder.** Local dev (Miniflare) ignores it; real deploy needs a real ID from `wrangler kv namespace create`.
 - **`compatibility_date`**: pinned to `2025-11-25` because the bundled workerd doesn't support later dates. Bump only when upgrading wrangler/workerd.
 - **`run_worker_first: ["/api/*"]` in `assets` config**: Worker handles `/api/*` first; all other paths fall through to the SPA bundle.
 - **Re-export the DO class from `src/worker/index.ts`** (`export { GameRoom } from "./do/GameRoom";`) — wrangler binds DO classes by import from the main module.
+- **Game functions are pure + immutable.** `placeStone` / `clearWinningLines` return new boards; never mutate the input. The RNG used by `clearWinningLines` is injected for testability.
+- **Token = 128 hex chars** (64 random bytes from `crypto.getRandomValues`). Compared in constant time. Stored in KV `user:<username>.token` and in the browser's `localStorage`.
+
+## Milestones progress
+
+`REFACTOR_PLAN.md` has the full plan. Completed so far on branch `rewrite/serverless`:
+
+- **M0** — scaffold (Vite-React-Cloudflare template + Tailwind + Zod + DO/KV bindings + smoke endpoints)
+- **M1** — pure game engine + AI in `src/worker/game/`, 33 tests, 99% line coverage
+- **M2** — username claim + KV adapter + welcome modal + identity hook, 16 more tests
+
+Next is **M3** — single-player vs AI on the board UI.
