@@ -1,0 +1,132 @@
+import { useState } from "react";
+import {
+	RoomCodeSchema,
+	type RoomVisibility,
+} from "../../shared/protocol";
+
+interface Props {
+	roomCode: string;
+	visibility: RoomVisibility | null;
+	connection: "connecting" | "open" | "closed" | "error";
+	busy: boolean;
+	onCreateRoom: (visibility: RoomVisibility) => void;
+	onJoinRoom: (code: string) => void;
+}
+
+export function RoomWidget({
+	roomCode,
+	visibility,
+	connection,
+	busy,
+	onCreateRoom,
+	onJoinRoom,
+}: Props) {
+	const [codeInput, setCodeInput] = useState("");
+	const [codeError, setCodeError] = useState<string | null>(null);
+
+	const submitJoin = (e: React.FormEvent) => {
+		e.preventDefault();
+		const trimmed = codeInput.trim().toUpperCase();
+		const parsed = RoomCodeSchema.safeParse(trimmed);
+		if (!parsed.success) {
+			setCodeError("6 位字母数字");
+			return;
+		}
+		setCodeError(null);
+		setCodeInput("");
+		onJoinRoom(parsed.data);
+	};
+
+	return (
+		<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3 space-y-3">
+			<div className="flex items-start justify-between gap-2">
+				<div className="min-w-0">
+					<h3 className="text-stone-400 text-xs uppercase tracking-wider">
+						当前房间
+					</h3>
+					<div className="flex items-center gap-2 mt-1 flex-wrap">
+						<span className="font-mono tracking-widest text-stone-100 text-lg">
+							{roomCode}
+						</span>
+						{visibility && (
+							<span
+								className={`text-xs px-1.5 py-0.5 rounded ${
+									visibility === "public"
+										? "bg-emerald-900/60 text-emerald-300"
+										: "bg-indigo-900/60 text-indigo-300"
+								}`}
+							>
+								{visibility === "public" ? "公开" : "私人"}
+							</span>
+						)}
+					</div>
+				</div>
+				<ConnectionDot status={connection} />
+			</div>
+
+			<div className="grid grid-cols-2 gap-2">
+				<button
+					type="button"
+					onClick={() => onCreateRoom("public")}
+					disabled={busy}
+					className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-40 text-stone-50 text-sm px-2 py-2 rounded transition-colors"
+				>
+					新建公开
+				</button>
+				<button
+					type="button"
+					onClick={() => onCreateRoom("private")}
+					disabled={busy}
+					className="bg-indigo-700 hover:bg-indigo-600 disabled:opacity-40 text-stone-50 text-sm px-2 py-2 rounded transition-colors"
+				>
+					新建私人
+				</button>
+			</div>
+
+			<form onSubmit={submitJoin} className="flex gap-2">
+				<input
+					type="text"
+					value={codeInput}
+					onChange={(e) => setCodeInput(e.target.value)}
+					placeholder="房间码"
+					maxLength={6}
+					autoCapitalize="characters"
+					autoComplete="off"
+					className="flex-1 min-w-0 bg-stone-900 border border-stone-700 rounded px-2 py-1.5 text-stone-100 placeholder:text-stone-500 uppercase tracking-widest font-mono text-sm focus:outline-none focus:border-stone-500"
+				/>
+				<button
+					type="submit"
+					disabled={busy || codeInput.length === 0}
+					className="bg-stone-700 hover:bg-stone-600 disabled:opacity-40 text-stone-100 text-sm px-3 py-1.5 rounded transition-colors"
+				>
+					加入
+				</button>
+			</form>
+			{codeError && (
+				<p className="text-red-400 text-xs">{codeError}</p>
+			)}
+		</section>
+	);
+}
+
+function ConnectionDot({ status }: { status: string }) {
+	const map: Record<string, { cls: string; label: string }> = {
+		connecting: { cls: "bg-stone-500 animate-pulse", label: "连接中" },
+		open: { cls: "bg-emerald-500", label: "在线" },
+		closed: { cls: "bg-stone-600", label: "已断开" },
+		error: { cls: "bg-red-500", label: "出错" },
+	};
+	const m = map[status] ?? map.closed;
+	return (
+		<span
+			className="flex items-center gap-1.5 text-xs text-stone-400 shrink-0"
+			title={m.label}
+		>
+			<span
+				className={`inline-block w-2 h-2 rounded-full ${m.cls}`}
+				aria-hidden
+			/>
+			{m.label}
+		</span>
+	);
+}
