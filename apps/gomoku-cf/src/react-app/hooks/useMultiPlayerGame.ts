@@ -21,6 +21,8 @@ export interface ClearEvent {
 	clearedSelf: number;
 	removedFromOpponents: Record<string, number>;
 	pointsAwarded: number;
+	/** Server attaches a random Tang quatrain whenever pointsAwarded > 0. */
+	poem: Poem | null;
 }
 
 export interface RoomState {
@@ -35,14 +37,6 @@ export interface RoomState {
 export interface TimeoutEvent {
 	id: number;
 	username: string;
-}
-
-export interface EndEvent {
-	id: number;
-	finalScores: Record<string, number>;
-	poem: Poem | null;
-	/** Winner = the player with the highest finalScores entry. */
-	winner: string | null;
 }
 
 interface Options {
@@ -64,7 +58,6 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 	const [state, setState] = useState<RoomState | null>(null);
 	const [lastClear, setLastClear] = useState<ClearEvent | null>(null);
 	const [lastTimeout, setLastTimeout] = useState<TimeoutEvent | null>(null);
-	const [lastEnd, setLastEnd] = useState<EndEvent | null>(null);
 	const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
 	const wsRef = useRef<WebSocket | null>(null);
@@ -115,8 +108,6 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 						visibility: parsed.visibility,
 						lastMove: lastMoveRef.current,
 					});
-					// New round started → drop the previous round's banner.
-					if (parsed.status !== "finished") setLastEnd(null);
 					break;
 				case "move":
 					lastMoveRef.current = {
@@ -135,6 +126,7 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 						clearedSelf: parsed.clearedSelf,
 						removedFromOpponents: parsed.removedFromOpponents,
 						pointsAwarded: parsed.pointsAwarded,
+						poem: parsed.poem ?? null,
 					});
 					break;
 				case "timeout":
@@ -146,23 +138,6 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 				case "error":
 					setErrorMsg(parsed.message);
 					break;
-				case "end": {
-					let winner: string | null = null;
-					let best = -1;
-					for (const [name, score] of Object.entries(parsed.finalScores)) {
-						if (score > best) {
-							best = score;
-							winner = name;
-						}
-					}
-					setLastEnd({
-						id: ++eventIdRef.current,
-						finalScores: parsed.finalScores,
-						poem: parsed.poem ?? null,
-						winner,
-					});
-					break;
-				}
 			}
 		};
 
@@ -242,7 +217,6 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		isSpectator,
 		lastClear,
 		lastTimeout,
-		lastEnd,
 		errorMsg,
 		place,
 		restart,

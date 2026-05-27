@@ -11,6 +11,9 @@ interface Props {
 	busy: boolean;
 	onCreateRoom: (visibility: RoomVisibility) => void;
 	onJoinRoom: (code: string) => void;
+	/** Resets the board + every player's per-room score to 0. The only
+	    way scores zero out — there's no auto-end-round any more. */
+	onRestart: () => void;
 }
 
 export function RoomWidget({
@@ -20,6 +23,7 @@ export function RoomWidget({
 	busy,
 	onCreateRoom,
 	onJoinRoom,
+	onRestart,
 }: Props) {
 	const [codeInput, setCodeInput] = useState("");
 	const [codeError, setCodeError] = useState<string | null>(null);
@@ -105,6 +109,15 @@ export function RoomWidget({
 			{codeError && (
 				<p className="text-red-400 text-xs">{codeError}</p>
 			)}
+
+			<button
+				type="button"
+				onClick={onRestart}
+				className="w-full text-stone-500 hover:text-stone-300 text-xs py-1 transition-colors"
+				title="清空棋盘并把所有人的本房分数归零"
+			>
+				重开本房间棋局
+			</button>
 		</section>
 	);
 }

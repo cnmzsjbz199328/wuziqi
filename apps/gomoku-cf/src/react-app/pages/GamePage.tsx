@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { Board } from "../components/Board";
-import { EndScreen } from "../components/EndScreen";
 import { LobbyWidget } from "../components/LobbyWidget";
 import { PlayerList, paletteForPlayers } from "../components/PlayerList";
 import { RoomWidget } from "../components/RoomWidget";
 import { SignInCard } from "../components/SignInCard";
 import type { Identity } from "../hooks/useIdentity";
 import { useMultiPlayerGame } from "../hooks/useMultiPlayerGame";
-import type { RoomVisibility } from "../../shared/protocol";
+import type { Poem, RoomVisibility } from "../../shared/protocol";
 
 interface Props {
 	identity: Identity | null;
@@ -17,6 +16,9 @@ interface Props {
 	onJoinRoom: (code: string) => void;
 	onRandomSignIn: () => Promise<void>;
 	onCustomSignIn: (name: string) => Promise<void>;
+	/** Surfaces the latest clear-event poem (room-scoped) up to App so
+	    it can be typewritten in the page header without blocking play. */
+	onPoem: (poem: Poem) => void;
 }
 
 export function GamePage({
@@ -27,6 +29,7 @@ export function GamePage({
 	onJoinRoom,
 	onRandomSignIn,
 	onCustomSignIn,
+	onPoem,
 }: Props) {
 	const {
 		connection,
@@ -35,7 +38,6 @@ export function GamePage({
 		isSpectator,
 		lastClear,
 		lastTimeout,
-		lastEnd,
 		errorMsg,
 		place,
 		restart,
@@ -47,6 +49,12 @@ export function GamePage({
 
 	const [signInHintAt, setSignInHintAt] = useState(0);
 
+	// Every new lastClear with a poem fires the header swap. The key is
+	// lastClear.id so a re-render without a new event doesn't re-trigger.
+	useEffect(() => {
+		if (lastClear?.poem) onPoem(lastClear.poem);
+	}, [lastClear?.id, lastClear?.poem, onPoem]);
+
 	const handlePlace = (row: number, col: number) => {
 		if (isSpectator) {
 			setSignInHintAt(Date.now());
@@ -57,8 +65,6 @@ export function GamePage({
 
 	const turnLabel = !state ? (
 		"连接中…"
-	) : state.status === "finished" ? (
-		"本轮结束"
 	) : state.status === "waiting" ? (
 		isSpectator ? "等待玩家加入…(观战中)" : "等待玩家加入…"
 	) : isSpectator ? (
@@ -112,7 +118,7 @@ export function GamePage({
 				</div>
 
 				<p className="text-stone-500 text-xs text-center px-2">
-					五连成线 → 清除己方连子,每位对手随机被扰乱相同数量。先达 5 分者胜。
+					五连成线 → 清除己方连子,每位对手随机被扰乱相同数量,得分时古诗在标题处显现。
 				</p>
 			</div>
 
@@ -128,6 +134,7 @@ export function GamePage({
 						busy={busy}
 						onCreateRoom={onCreateRoom}
 						onJoinRoom={onJoinRoom}
+						onRestart={restart}
 					/>
 				)}
 
@@ -162,15 +169,6 @@ export function GamePage({
 			<TimeoutBanner event={lastTimeout} />
 			<ErrorBanner message={errorMsg} />
 			<SignInHint key={signInHintAt} visible={signInHintAt > 0} />
-
-			{!isSpectator && lastEnd && state?.status === "finished" && (
-				<EndScreen
-					event={lastEnd}
-					me={identity?.username ?? ""}
-					onRestart={restart}
-					onLeave={() => onCreateRoom("private")}
-				/>
-			)}
 		</div>
 	);
 }

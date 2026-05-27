@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Board } from "./components/Board";
 import { LobbyWidget } from "./components/LobbyWidget";
+import { PoemHeader } from "./components/PoemHeader";
 import { SignInCard } from "./components/SignInCard";
 import { UserBadge } from "./components/UserBadge";
 import { useIdentity } from "./hooks/useIdentity";
@@ -11,6 +12,7 @@ import {
 	RoomCodeSchema,
 	type Board as BoardType,
 	type Cell,
+	type Poem,
 	type RoomVisibility,
 } from "../shared/protocol";
 
@@ -49,6 +51,7 @@ function App() {
 	const [roomCode, setRoomCode] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [appError, setAppError] = useState<string | null>(null);
+	const [headerPoem, setHeaderPoem] = useState<Poem | null>(null);
 
 	const bootstrappingRef = useRef(false);
 
@@ -128,10 +131,18 @@ function App() {
 		[claimCustom]
 	);
 
+	const showPoem = useCallback((poem: Poem) => {
+		setHeaderPoem(poem);
+	}, []);
+
+	const clearPoem = useCallback(() => {
+		setHeaderPoem(null);
+	}, []);
+
 	return (
 		<div className="min-h-screen bg-stone-900 text-stone-100">
-			<header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-stone-800">
-				<h1 className="text-xl font-bold">五子棋</h1>
+			<header className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-stone-800">
+				<PoemHeader poem={headerPoem} onDone={clearPoem} />
 				{state.status === "ready" && (
 					<UserBadge
 						identity={state.identity}
@@ -151,6 +162,7 @@ function App() {
 						onJoinRoom={switchRoom}
 						onRandomSignIn={randomSignIn}
 						onCustomSignIn={customSignIn}
+						onPoem={showPoem}
 					/>
 				) : (
 					<LandingShell

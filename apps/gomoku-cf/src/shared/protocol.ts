@@ -199,7 +199,9 @@ export const ServerMoveSchema = z.object({
 });
 
 // Sent right after a move that triggered the 5-in-a-row clear+disrupt rule.
-// The state message that follows it carries the post-clear board.
+// The state message that follows carries the post-clear board. The optional
+// poem rides along with any clear that awarded points — the client surfaces
+// it briefly in the page header (room-scoped: broadcast is per-DO).
 export const ServerClearSchema = z.object({
 	type: z.literal("clear"),
 	by: UsernameSchema,
@@ -207,6 +209,7 @@ export const ServerClearSchema = z.object({
 	// username → number-of-stones-removed for every other player on board.
 	removedFromOpponents: z.record(UsernameSchema, z.number().int().nonnegative()),
 	pointsAwarded: z.number().int().nonnegative(),
+	poem: PoemSchema.optional(),
 });
 
 // Sent when a player's turn auto-advances because they didn't move
@@ -215,13 +218,6 @@ export const ServerClearSchema = z.object({
 export const ServerTimeoutSchema = z.object({
 	type: z.literal("timeout"),
 	username: UsernameSchema,
-});
-
-// Optional flourish on round end (currently unused but reserved for M5).
-export const ServerEndSchema = z.object({
-	type: z.literal("end"),
-	finalScores: z.record(UsernameSchema, z.number().int().nonnegative()),
-	poem: PoemSchema.optional(),
 });
 
 export const ServerErrorSchema = z.object({
@@ -235,7 +231,6 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
 	ServerMoveSchema,
 	ServerClearSchema,
 	ServerTimeoutSchema,
-	ServerEndSchema,
 	ServerErrorSchema,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;

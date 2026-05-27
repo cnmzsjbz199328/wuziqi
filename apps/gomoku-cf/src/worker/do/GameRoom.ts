@@ -37,7 +37,7 @@ import {
 	placeStone,
 	scoreForClear,
 } from "../game/board";
-import { addScoreInternal, getUser } from "../kv/users";
+import { getUser } from "../kv/users";
 import {
 	removePublicRoom,
 	upsertPublicRoom,
@@ -58,12 +58,6 @@ const TURN_TIMEOUT_MS = 60_000;
 // A room with no connected humans is destroyed after 5 minutes idle.
 // A reconnect during the window cancels the GC and resumes play.
 const ROOM_GC_MS = 5 * 60_000;
-
-// First player to accumulate this many in-room points wins the round.
-// At max ~5 pts per 5-in-a-row event, that's typically 2-4 clear events;
-// short enough to keep matches snappy, long enough that a single lucky
-// fork doesn't decide it.
-const ROUND_WIN_POINTS = 5;
 
 type AlarmReason = "bot_move" | "turn_timeout" | "room_gc";
 
@@ -350,70 +344,34 @@ export class GameRoom extends DurableObject<Env> {
 
 		this.broadcast({ type: "move", row, col, by: username });
 
-		let roundWonBy: string | null = null;
 		if (hasFiveInARow(nextBoard, username)) {
 			const result = clearWinningLines(nextBoard, username);
 			nextBoard = result.board;
 			const pointsAwarded = scoreForClear(result.clearedSelf);
 			if (pointsAwarded > 0) {
-				const newScore = await this.bumpPlayerScore(username, pointsAwarded);
-				if (username !== BOT_USERNAME) {
-					// Fire-and-forget — the player's KV row is the durable
-					// home for cross-room totals; failure just means they
-					// lose this one event's worth, no game-breaking impact.
-					this.ctx.waitUntil(
-						addScoreInternal(this.env.KV, username, pointsAwarded)
-					);
-				}
-				if (newScore >= ROUND_WIN_POINTS) {
-					roundWonBy = username;
-				}
+				await this.bumpPlayerScore(username, pointsAwarded);
 			}
+			// Per-game scoring (no cumulative cross-room total). Each scoring
+			// clear carries a random poem; the client surfaces it briefly in
+			// the page header. Per-room scores keep counting up — only a
+			// manual ClientRestart resets them.
 			this.broadcast({
 				type: "clear",
 				by: username,
 				clearedSelf: result.clearedSelf,
 				removedFromOpponents: result.removedFromOpponents,
 				pointsAwarded,
+				poem: pointsAwarded > 0 ? pickRandomPoem() : undefined,
 			});
 		}
 
 		await this.storage().put("board", nextBoard);
-
-		if (roundWonBy) {
-			await this.endRound();
-			return;
-		}
-
 		await this.advanceTurn();
 		await this.broadcastState();
 		await this.rescheduleAlarm();
 	}
 
-	private async endRound(): Promise<void> {
-		await this.storage().put("status", "finished" as GameStatus);
-		await this.storage().put("turn", null);
-		const players =
-			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
-		const finalScores: Record<string, number> = {};
-		for (const p of players) finalScores[p.username] = p.score;
-		this.broadcast({
-			type: "end",
-			finalScores,
-			poem: pickRandomPoem(),
-		});
-		await this.broadcastState();
-		await this.publishLobbyEntryIfPublic();
-		await this.rescheduleAlarm();
-	}
-
-	private async restartRound(by: string): Promise<void> {
-		const status =
-			(await this.storage().get<GameStatus>("status")) ?? "waiting";
-		if (status !== "finished") {
-			this.sendErrorTo(by, "not_finished", "Round is not finished yet");
-			return;
-		}
+	private async restartRound(): Promise<void> {
 		const players =
 			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
 		const reset = players.map((p) => ({ ...p, score: 0 }));
@@ -685,7 +643,7 @@ export class GameRoom extends DurableObject<Env> {
 			return;
 		}
 		if (m.type === "restart") {
-			await this.restartRound(att.username!);
+			await this.restartRound();
 			return;
 		}
 		if (m.type === "resign") {
