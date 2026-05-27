@@ -11,12 +11,22 @@ interface Props {
 }
 
 export function MultiPlayerPage({ identity, roomCode, onLeave }: Props) {
-	const { connection, state, isMyTurn, lastClear, errorMsg, place, leave } =
-		useMultiPlayerGame({
-			roomCode,
-			username: identity.username,
-			token: identity.token,
-		});
+	const {
+		connection,
+		state,
+		isMyTurn,
+		lastClear,
+		lastTimeout,
+		lastEnd,
+		errorMsg,
+		place,
+		restart,
+		leave,
+	} = useMultiPlayerGame({
+		roomCode,
+		username: identity.username,
+		token: identity.token,
+	});
 
 	const handleLeave = () => {
 		leave();
@@ -25,15 +35,15 @@ export function MultiPlayerPage({ identity, roomCode, onLeave }: Props) {
 
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between gap-3">
+			<div className="flex items-center justify-between gap-2 flex-wrap">
 				<button
 					type="button"
 					onClick={handleLeave}
-					className="text-stone-400 hover:text-stone-200 text-sm"
+					className="text-stone-400 hover:text-stone-200 text-sm py-1.5"
 				>
 					← 离开
 				</button>
-				<div className="flex items-center gap-2">
+				<div className="flex items-center gap-2 min-w-0">
 					<span className="text-stone-400 text-xs uppercase tracking-wider">
 						房间
 					</span>
@@ -106,7 +116,16 @@ export function MultiPlayerPage({ identity, roomCode, onLeave }: Props) {
 			)}
 
 			<ClearBanner event={lastClear} me={identity.username} />
+			<TimeoutBanner event={lastTimeout} me={identity.username} />
 			<ErrorBanner message={errorMsg} />
+			{lastEnd && state?.status === "finished" && (
+				<EndScreen
+					event={lastEnd}
+					me={identity.username}
+					onRestart={restart}
+					onLeave={handleLeave}
+				/>
+			)}
 		</div>
 	);
 }
@@ -166,6 +185,31 @@ function ClearBanner({
 	);
 }
 
+function TimeoutBanner({
+	event,
+	me,
+}: {
+	event: { id: number; username: string } | null;
+	me: string;
+}) {
+	const [dismissedId, setDismissedId] = useState<number | null>(null);
+	useEffect(() => {
+		if (!event) return;
+		const h = window.setTimeout(() => setDismissedId(event.id), 3000);
+		return () => window.clearTimeout(h);
+	}, [event]);
+	if (!event || event.id === dismissedId) return null;
+	const mine = event.username === me;
+	return (
+		<div
+			role="status"
+			className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded bg-amber-900/90 border border-amber-700 text-amber-100 text-sm"
+		>
+			{mine ? "你超时了,本回合跳过" : `${event.username} 超时,跳过`}
+		</div>
+	);
+}
+
 function ErrorBanner({ message }: { message: string | null }) {
 	const [dismissed, setDismissed] = useState<string | null>(null);
 	useEffect(() => {
@@ -180,6 +224,128 @@ function ErrorBanner({ message }: { message: string | null }) {
 			className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded bg-red-950/90 border border-red-800 text-red-100 text-sm"
 		>
 			{message}
+		</div>
+	);
+}
+
+const TYPE_INTERVAL_MS = 90;
+
+function EndScreen({
+	event,
+	me,
+	onRestart,
+	onLeave,
+}: {
+	event: {
+		id: number;
+		winner: string | null;
+		finalScores: Record<string, number>;
+		poem: { text: string; author?: string } | null;
+	};
+	me: string;
+	onRestart: () => void;
+	onLeave: () => void;
+}) {
+	const poemText = event.poem?.text ?? "";
+	const [visible, setVisible] = useState(0);
+
+	// Reset and replay the typewriter every time a new EndEvent lands.
+	useEffect(() => {
+		setVisible(0);
+		if (!poemText) return;
+		const id = window.setInterval(() => {
+			setVisible((v) => {
+				if (v >= poemText.length) {
+					window.clearInterval(id);
+					return v;
+				}
+				return v + 1;
+			});
+		}, TYPE_INTERVAL_MS);
+		return () => window.clearInterval(id);
+	}, [event.id, poemText]);
+
+	const done = visible >= poemText.length;
+	const iWon = event.winner === me;
+
+	return (
+		<div className="fixed inset-0 z-50 bg-stone-950/90 backdrop-blur-sm flex items-center justify-center px-4">
+			<div className="bg-stone-900 border border-stone-700 rounded-xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-2xl">
+				<div className="text-center space-y-1">
+					<h2
+						className={`text-2xl font-bold ${
+							iWon ? "text-emerald-400" : "text-stone-200"
+						}`}
+					>
+						{iWon
+							? "你赢了"
+							: event.winner
+							? `${event.winner} 获胜`
+							: "本轮结束"}
+					</h2>
+					<p className="text-stone-400 text-sm">先达到 5 分者胜</p>
+				</div>
+
+				{event.poem && (
+					<div className="bg-stone-800/80 border border-stone-700 rounded-lg p-5 text-center">
+						<p className="text-amber-100 text-lg leading-relaxed whitespace-pre-line min-h-[3.5rem]">
+							{poemText.slice(0, visible)}
+							{!done && <span className="poem-caret text-amber-300" />}
+						</p>
+						{event.poem.author && done && (
+							<p className="text-stone-400 text-xs mt-3 transition-opacity">
+								— {event.poem.author}
+							</p>
+						)}
+					</div>
+				)}
+
+				<div>
+					<h3 className="text-stone-400 text-xs uppercase tracking-wider mb-2">
+						最终得分
+					</h3>
+					<ul className="space-y-1">
+						{Object.entries(event.finalScores)
+							.sort(([, a], [, b]) => b - a)
+							.map(([name, score]) => (
+								<li
+									key={name}
+									className="flex justify-between text-sm border-b border-stone-800 py-1 last:border-0"
+								>
+									<span
+										className={
+											name === event.winner
+												? "text-amber-300 font-medium"
+												: name === me
+												? "text-emerald-300"
+												: "text-stone-200"
+										}
+									>
+										{name}
+									</span>
+									<span className="text-amber-300 tabular-nums">{score}</span>
+								</li>
+							))}
+					</ul>
+				</div>
+
+				<div className="grid grid-cols-2 gap-3">
+					<button
+						type="button"
+						onClick={onLeave}
+						className="bg-stone-700 hover:bg-stone-600 text-stone-100 px-4 py-2.5 rounded transition-colors"
+					>
+						返回大厅
+					</button>
+					<button
+						type="button"
+						onClick={onRestart}
+						className="bg-emerald-700 hover:bg-emerald-600 text-stone-50 px-4 py-2.5 rounded transition-colors"
+					>
+						再来一局
+					</button>
+				</div>
+			</div>
 		</div>
 	);
 }

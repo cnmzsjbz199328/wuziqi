@@ -31,6 +31,13 @@ export function LobbyPage({ identity, onEnterRoom, onBack }: Props) {
 
 	useEffect(() => {
 		refresh();
+		// Live refresh every 10s while the lobby is visible. KV is
+		// eventually-consistent (~60s) so the bound here is set by KV's
+		// own propagation, not the timer.
+		const id = window.setInterval(() => {
+			if (document.visibilityState === "visible") refresh();
+		}, 10_000);
+		return () => window.clearInterval(id);
 	}, [refresh]);
 
 	const create = useCallback(
@@ -64,11 +71,11 @@ export function LobbyPage({ identity, onEnterRoom, onBack }: Props) {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
+			<div className="flex items-center justify-between gap-2 flex-wrap">
 				<button
 					type="button"
 					onClick={onBack}
-					className="text-stone-400 hover:text-stone-200 text-sm"
+					className="text-stone-400 hover:text-stone-200 text-sm py-1.5"
 				>
 					← 返回
 				</button>
@@ -77,7 +84,7 @@ export function LobbyPage({ identity, onEnterRoom, onBack }: Props) {
 					type="button"
 					onClick={refresh}
 					disabled={loading || busy}
-					className="bg-stone-700 hover:bg-stone-600 disabled:opacity-40 text-stone-100 text-sm px-3 py-1.5 rounded transition-colors"
+					className="bg-stone-700 hover:bg-stone-600 disabled:opacity-40 text-stone-100 text-sm px-3 py-2 rounded transition-colors"
 				>
 					刷新
 				</button>
@@ -109,13 +116,15 @@ export function LobbyPage({ identity, onEnterRoom, onBack }: Props) {
 						onChange={(e) => setCodeInput(e.target.value)}
 						placeholder="房间码"
 						maxLength={6}
-						className="flex-1 bg-stone-800 border border-stone-700 rounded px-3 py-2 text-stone-100 placeholder:text-stone-500 uppercase tracking-widest font-mono focus:outline-none focus:border-stone-500"
+						autoCapitalize="characters"
+						autoComplete="off"
+						className="flex-1 bg-stone-800 border border-stone-700 rounded px-3 py-2.5 text-stone-100 placeholder:text-stone-500 uppercase tracking-widest font-mono focus:outline-none focus:border-stone-500"
 					/>
 					<button
 						type="button"
 						onClick={joinByCode}
 						disabled={busy || codeInput.length === 0}
-						className="bg-stone-700 hover:bg-stone-600 disabled:opacity-40 text-stone-100 text-sm px-4 py-2 rounded transition-colors"
+						className="bg-stone-700 hover:bg-stone-600 disabled:opacity-40 text-stone-100 text-sm px-4 py-2.5 rounded transition-colors"
 					>
 						加入
 					</button>

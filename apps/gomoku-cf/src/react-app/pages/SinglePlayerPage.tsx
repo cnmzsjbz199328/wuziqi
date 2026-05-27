@@ -38,11 +38,11 @@ export function SinglePlayerPage({ identity, score, onScored, onBack }: Props) {
 
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between gap-3">
+			<div className="flex items-center justify-between gap-2 flex-wrap">
 				<button
 					type="button"
 					onClick={onBack}
-					className="text-stone-400 hover:text-stone-200 text-sm"
+					className="text-stone-400 hover:text-stone-200 text-sm py-1.5"
 				>
 					← 返回
 				</button>
@@ -64,7 +64,7 @@ export function SinglePlayerPage({ identity, score, onScored, onBack }: Props) {
 				<button
 					type="button"
 					onClick={reset}
-					className="bg-stone-700 hover:bg-stone-600 text-stone-100 text-sm px-3 py-1.5 rounded transition-colors"
+					className="bg-stone-700 hover:bg-stone-600 text-stone-100 text-sm px-3 py-2 rounded transition-colors"
 				>
 					重开
 				</button>

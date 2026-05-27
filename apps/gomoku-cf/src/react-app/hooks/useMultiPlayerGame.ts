@@ -3,6 +3,7 @@ import {
 	ServerMessageSchema,
 	type Board,
 	type GameStatus,
+	type Poem,
 	type RoomPlayer,
 	type RoomVisibility,
 	type ServerMessage,
@@ -31,6 +32,19 @@ export interface RoomState {
 	lastMove: { row: number; col: number; by: string } | null;
 }
 
+export interface TimeoutEvent {
+	id: number;
+	username: string;
+}
+
+export interface EndEvent {
+	id: number;
+	finalScores: Record<string, number>;
+	poem: Poem | null;
+	/** Winner = the player with the highest finalScores entry. */
+	winner: string | null;
+}
+
 interface Options {
 	roomCode: string;
 	username: string;
@@ -43,6 +57,8 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 	const [connection, setConnection] = useState<ConnectionStatus>("connecting");
 	const [state, setState] = useState<RoomState | null>(null);
 	const [lastClear, setLastClear] = useState<ClearEvent | null>(null);
+	const [lastTimeout, setLastTimeout] = useState<TimeoutEvent | null>(null);
+	const [lastEnd, setLastEnd] = useState<EndEvent | null>(null);
 	const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
 	const wsRef = useRef<WebSocket | null>(null);
@@ -89,6 +105,8 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 						visibility: parsed.visibility,
 						lastMove: lastMoveRef.current,
 					});
+					// New round started → drop the previous round's banner.
+					if (parsed.status !== "finished") setLastEnd(null);
 					break;
 				case "move":
 					lastMoveRef.current = {
@@ -109,12 +127,32 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 						pointsAwarded: parsed.pointsAwarded,
 					});
 					break;
+				case "timeout":
+					setLastTimeout({
+						id: ++eventIdRef.current,
+						username: parsed.username,
+					});
+					break;
 				case "error":
 					setErrorMsg(parsed.message);
 					break;
-				case "end":
-					// Reserved for M5 round-end flow.
+				case "end": {
+					let winner: string | null = null;
+					let best = -1;
+					for (const [name, score] of Object.entries(parsed.finalScores)) {
+						if (score > best) {
+							best = score;
+							winner = name;
+						}
+					}
+					setLastEnd({
+						id: ++eventIdRef.current,
+						finalScores: parsed.finalScores,
+						poem: parsed.poem ?? null,
+						winner,
+					});
 					break;
+				}
 			}
 		};
 
@@ -149,6 +187,22 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		ws.send(JSON.stringify({ type: "place", row, col }));
 	}, []);
 
+	const restart = useCallback(() => {
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN) return;
+		ws.send(JSON.stringify({ type: "restart" }));
+	}, []);
+
+	// Also drop lastMove on restart so the new round opens with a clean
+	// indicator rather than the previous round's final dot.
+	useEffect(() => {
+		if (state?.status === "playing" || state?.status === "waiting") {
+			if (lastMoveRef.current && state.board[lastMoveRef.current.row]?.[lastMoveRef.current.col] === null) {
+				lastMoveRef.current = null;
+			}
+		}
+	}, [state?.status, state?.board]);
+
 	const leave = useCallback(() => {
 		cancelledRef.current = true;
 		if (reconnectTimerRef.current !== null) {
@@ -168,8 +222,11 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		me,
 		isMyTurn,
 		lastClear,
+		lastTimeout,
+		lastEnd,
 		errorMsg,
 		place,
+		restart,
 		leave,
 	};
 }

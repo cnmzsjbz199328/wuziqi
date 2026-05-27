@@ -156,10 +156,17 @@ export const ClientResignSchema = z.object({
 	type: z.literal("resign"),
 });
 
+// Any seated player can ask the room to start a fresh round once the
+// previous one finished. Resets the board and per-room scores.
+export const ClientRestartSchema = z.object({
+	type: z.literal("restart"),
+});
+
 export const ClientMessageSchema = z.discriminatedUnion("type", [
 	ClientJoinSchema,
 	ClientPlaceSchema,
 	ClientResignSchema,
+	ClientRestartSchema,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
@@ -202,6 +209,14 @@ export const ServerClearSchema = z.object({
 	pointsAwarded: z.number().int().nonnegative(),
 });
 
+// Sent when a player's turn auto-advances because they didn't move
+// within the per-turn deadline. Broadcast to the whole room so the
+// UI can surface "X 超时跳过" without inferring it from the state diff.
+export const ServerTimeoutSchema = z.object({
+	type: z.literal("timeout"),
+	username: UsernameSchema,
+});
+
 // Optional flourish on round end (currently unused but reserved for M5).
 export const ServerEndSchema = z.object({
 	type: z.literal("end"),
@@ -219,6 +234,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
 	ServerStateSchema,
 	ServerMoveSchema,
 	ServerClearSchema,
+	ServerTimeoutSchema,
 	ServerEndSchema,
 	ServerErrorSchema,
 ]);

@@ -43,6 +43,7 @@ import {
 	upsertPublicRoom,
 	type RoomIndexEntry,
 } from "../kv/rooms";
+import { pickRandomPoem } from "../poems";
 
 // Palette order = seat order. Bot always takes the last slot (amber);
 // humans grab the next free color from the front.
@@ -50,6 +51,21 @@ const HUMAN_COLORS: PlayerColor[] = ["black", "white", "red", "blue"];
 const BOT_COLOR: PlayerColor = "amber";
 
 const BOT_THINK_MS = 600;
+// A connected human has 60s to move; otherwise their turn auto-skips.
+// Long enough for an inattentive player to come back from a tab switch,
+// short enough that the next player isn't blocked indefinitely.
+const TURN_TIMEOUT_MS = 60_000;
+// A room with no connected humans is destroyed after 5 minutes idle.
+// A reconnect during the window cancels the GC and resumes play.
+const ROOM_GC_MS = 5 * 60_000;
+
+// First player to accumulate this many in-room points wins the round.
+// At max ~5 pts per 5-in-a-row event, that's typically 2-4 clear events;
+// short enough to keep matches snappy, long enough that a single lucky
+// fork doesn't decide it.
+const ROUND_WIN_POINTS = 5;
+
+type AlarmReason = "bot_move" | "turn_timeout" | "room_gc";
 
 interface StoredMeta {
 	code: string;
@@ -204,7 +220,7 @@ export class GameRoom extends DurableObject<Env> {
 		// is included in the broadcast.
 		await this.maybeStartPlaying();
 		await this.broadcastState();
-		await this.maybeKickBot();
+		await this.rescheduleAlarm();
 
 		return new Response(null, { status: 101, webSocket: client });
 	}
@@ -309,12 +325,13 @@ export class GameRoom extends DurableObject<Env> {
 
 		this.broadcast({ type: "move", row, col, by: username });
 
+		let roundWonBy: string | null = null;
 		if (hasFiveInARow(nextBoard, username)) {
 			const result = clearWinningLines(nextBoard, username);
 			nextBoard = result.board;
 			const pointsAwarded = scoreForClear(result.clearedSelf);
 			if (pointsAwarded > 0) {
-				await this.bumpPlayerScore(username, pointsAwarded);
+				const newScore = await this.bumpPlayerScore(username, pointsAwarded);
 				if (username !== BOT_USERNAME) {
 					// Fire-and-forget — the player's KV row is the durable
 					// home for cross-room totals; failure just means they
@@ -322,6 +339,9 @@ export class GameRoom extends DurableObject<Env> {
 					this.ctx.waitUntil(
 						addScoreInternal(this.env.KV, username, pointsAwarded)
 					);
+				}
+				if (newScore >= ROUND_WIN_POINTS) {
+					roundWonBy = username;
 				}
 			}
 			this.broadcast({
@@ -334,29 +354,98 @@ export class GameRoom extends DurableObject<Env> {
 		}
 
 		await this.storage().put("board", nextBoard);
+
+		if (roundWonBy) {
+			await this.endRound();
+			return;
+		}
+
 		await this.advanceTurn();
 		await this.broadcastState();
-		await this.maybeKickBot();
+		await this.rescheduleAlarm();
 	}
 
-	private async maybeKickBot(): Promise<void> {
-		const turn = (await this.storage().get<string>("turn")) ?? null;
+	private async endRound(): Promise<void> {
+		await this.storage().put("status", "finished" as GameStatus);
+		await this.storage().put("turn", null);
+		const players =
+			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
+		const finalScores: Record<string, number> = {};
+		for (const p of players) finalScores[p.username] = p.score;
+		this.broadcast({
+			type: "end",
+			finalScores,
+			poem: pickRandomPoem(),
+		});
+		await this.broadcastState();
+		await this.publishLobbyEntryIfPublic();
+		await this.rescheduleAlarm();
+	}
+
+	private async restartRound(by: string): Promise<void> {
 		const status =
 			(await this.storage().get<GameStatus>("status")) ?? "waiting";
-		if (status !== "playing" || turn !== BOT_USERNAME) {
+		if (status !== "finished") {
+			this.sendErrorTo(by, "not_finished", "Round is not finished yet");
+			return;
+		}
+		const players =
+			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
+		const reset = players.map((p) => ({ ...p, score: 0 }));
+		await this.storage().put({
+			players: reset,
+			board: createBoard(),
+			status: "waiting" as GameStatus,
+			turn: null,
+		});
+		await this.maybeStartPlaying();
+		await this.broadcastState();
+		await this.publishLobbyEntryIfPublic();
+		await this.rescheduleAlarm();
+	}
+
+	/**
+	 * Decide what (if anything) the single alarm slot should be doing
+	 * next, given the current turn, status, and connection set:
+	 *   - Bot's turn → bot_move @ +600ms (smartMove plays via alarm handler)
+	 *   - Connected human's turn → turn_timeout @ +60s (auto-skip if idle)
+	 *   - No connected humans → room_gc @ +5min (destroy if still empty)
+	 *   - Anything else (status != playing, etc.) → no alarm
+	 * Called after every state mutation that could shift this decision.
+	 */
+	private async rescheduleAlarm(): Promise<void> {
+		const status =
+			(await this.storage().get<GameStatus>("status")) ?? "waiting";
+		const hasHumans = this.hasAnyConnectedHuman();
+
+		if (!hasHumans) {
+			await this.storage().put("alarm_reason", "room_gc" satisfies AlarmReason);
+			await this.ctx.storage.setAlarm(Date.now() + ROOM_GC_MS);
+			return;
+		}
+
+		if (status !== "playing") {
+			await this.storage().delete("alarm_reason");
 			await this.ctx.storage.deleteAlarm();
 			return;
 		}
-		// Don't let the bot play to an empty room — if no humans are
-		// connected, the bot would just keep ticking against itself.
-		// Pause and wait for a human to reconnect.
-		if (!this.hasAnyConnectedHuman()) {
-			await this.ctx.storage.deleteAlarm();
+
+		const turn = (await this.storage().get<string>("turn")) ?? null;
+		if (turn === BOT_USERNAME) {
+			await this.storage().put("alarm_reason", "bot_move" satisfies AlarmReason);
+			await this.ctx.storage.setAlarm(Date.now() + BOT_THINK_MS);
 			return;
 		}
-		// Small delay so clients render the previous move before the bot
-		// move lands. The alarm handler does the actual play.
-		await this.ctx.storage.setAlarm(Date.now() + BOT_THINK_MS);
+		if (turn) {
+			await this.storage().put(
+				"alarm_reason",
+				"turn_timeout" satisfies AlarmReason
+			);
+			await this.ctx.storage.setAlarm(Date.now() + TURN_TIMEOUT_MS);
+			return;
+		}
+		await this.storage().delete("alarm_reason");
+		await this.ctx.storage.deleteAlarm();
 	}
 
 	private hasAnyConnectedHuman(): boolean {
@@ -368,34 +457,70 @@ export class GameRoom extends DurableObject<Env> {
 	}
 
 	async alarm(): Promise<void> {
-		const status =
-			(await this.storage().get<GameStatus>("status")) ?? "waiting";
-		if (status !== "playing") return;
-		const turn = (await this.storage().get<string>("turn")) ?? null;
-		if (turn !== BOT_USERNAME) return;
-		if (!this.hasAnyConnectedHuman()) return;
+		const reason =
+			(await this.storage().get<AlarmReason>("alarm_reason")) ?? null;
+		await this.storage().delete("alarm_reason");
 
-		const board =
-			(await this.storage().get<Board>("board")) ?? createBoard();
-		const players =
-			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
-		const opponents = players
-			.filter((p) => p.username !== BOT_USERNAME)
-			.map((p) => p.username);
-		const [row, col] = smartMove(board, BOT_USERNAME, opponents);
-		await this.handlePlace(BOT_USERNAME, row, col);
+		if (reason === "room_gc") {
+			// Confirm the precondition still holds — a reconnect could have
+			// raced the alarm — and if so, tear the room down.
+			if (this.hasAnyConnectedHuman()) {
+				await this.rescheduleAlarm();
+				return;
+			}
+			await this.destroy();
+			return;
+		}
+
+		if (reason === "bot_move") {
+			const status =
+				(await this.storage().get<GameStatus>("status")) ?? "waiting";
+			const turn = (await this.storage().get<string>("turn")) ?? null;
+			if (status !== "playing" || turn !== BOT_USERNAME) return;
+			if (!this.hasAnyConnectedHuman()) {
+				// Don't tick against an empty room — reschedule will set GC.
+				await this.rescheduleAlarm();
+				return;
+			}
+			const board =
+				(await this.storage().get<Board>("board")) ?? createBoard();
+			const players =
+				(await this.storage().get<StoredPlayer[]>("players")) ?? [];
+			const opponents = players
+				.filter((p) => p.username !== BOT_USERNAME)
+				.map((p) => p.username);
+			const [row, col] = smartMove(board, BOT_USERNAME, opponents);
+			await this.handlePlace(BOT_USERNAME, row, col);
+			return;
+		}
+
+		if (reason === "turn_timeout") {
+			const status =
+				(await this.storage().get<GameStatus>("status")) ?? "waiting";
+			const turn = (await this.storage().get<string>("turn")) ?? null;
+			if (status !== "playing" || !turn || turn === BOT_USERNAME) return;
+			// The timed-out player keeps their seat — they can rejoin and
+			// play next time their turn comes around. Just notify and skip.
+			this.broadcast({ type: "timeout", username: turn });
+			await this.advanceTurn();
+			await this.broadcastState();
+			await this.rescheduleAlarm();
+			return;
+		}
 	}
 
 	private async bumpPlayerScore(
 		username: string,
 		delta: number
-	): Promise<void> {
+	): Promise<number> {
 		const players =
 			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
 		const idx = players.findIndex((p) => p.username === username);
-		if (idx === -1) return;
-		players[idx] = { ...players[idx], score: players[idx].score + delta };
+		if (idx === -1) return 0;
+		const newScore = players[idx].score + delta;
+		players[idx] = { ...players[idx], score: newScore };
 		await this.storage().put("players", players);
+		return newScore;
 	}
 
 	// ---------- broadcasts ----------
@@ -516,8 +641,13 @@ export class GameRoom extends DurableObject<Env> {
 			await this.broadcastState();
 			return;
 		}
+		if (m.type === "restart") {
+			await this.restartRound(att.username);
+			return;
+		}
 		if (m.type === "resign") {
-			// M5 territory — for now a resign just disconnects.
+			// Resign disconnects the player; their seat is held for reconnect.
+			// True forfeit / score adjustment lives in a future milestone.
 			ws.close(1000, "resigned");
 			return;
 		}
@@ -527,13 +657,17 @@ export class GameRoom extends DurableObject<Env> {
 	async webSocketClose(): Promise<void> {
 		// Hibernation API closes the socket on its own; broadcast the
 		// updated presence so peers see the player flip to disconnected.
+		// Reschedule because the disconnect might have flipped us into
+		// "no humans" territory (→ room_gc) or away from someone's turn.
 		await this.broadcastState();
 		await this.publishLobbyEntryIfPublic();
+		await this.rescheduleAlarm();
 	}
 
 	async webSocketError(): Promise<void> {
 		await this.broadcastState();
 		await this.publishLobbyEntryIfPublic();
+		await this.rescheduleAlarm();
 	}
 
 	// ---------- lobby index ----------
