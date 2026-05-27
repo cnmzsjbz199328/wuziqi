@@ -23,9 +23,16 @@
 ### 非目标（明确不做）
 - 不做 OAuth / 社交登录；用户名注册 + 简单的 token 即可。
 - 不做匹配队列、好友、聊天、观战、回放（可标注为后续扩展点）。
-- 不保留原项目的**"清除连珠 + 随机移除对手棋子"非标准规则** —— 改回标准五子棋（一胜结束本局）。
 - 不保留 Java/Spring/JPA/Liquibase 任何代码，原 `Gomoku/` 目录在重构完成后会保留作为参考实现，不再维护。
 - 不写 Dockerfile / GitHub Actions 复杂流水线 —— `wrangler deploy` + 一个简单的 push-to-deploy workflow 即可。
+
+### 关键玩法保留（原项目特色）
+- **五连珠不结束本局，而是触发"清连珠 + 扰乱对手"事件**：
+  - 把己方所有当前的连珠（≥ 5 子）从棋盘移除；
+  - 然后随机从每个对手身上移除"己方刚清掉的子数"那么多颗棋子；
+  - 积分 = 己方清掉的子数 − 4（即单条 5 连珠 = 1 分，跨线/复式连珠收益指数级放大）；
+  - 棋局持续进行，玩家继续轮流落子，直到主动结束或离开房间。
+- 这套机制是这款五子棋的**核心差异化玩法**（鼓励"做形"而非"快胜"），不改回标准规则。
 
 ---
 
@@ -261,16 +268,32 @@ AI 仅在"对人机"模式中由 DO 在玩家落子后立即调用 —— 不需
 **验收**：`curl localhost:5173/api/ping` 返回 `{ok:true}`
 
 ### M1：纯游戏引擎（半天）
-- [ ] `src/worker/game/board.ts`：`createBoard()`, `place()`, `checkWin()`（返回胜方或 null），**纯函数、无副作用**
-- [ ] `src/worker/game/ai.ts`：`randomMove`、`smartMove`
+- [ ] `src/worker/game/board.ts`：所有 API **纯函数 + 不可变**（接受 board，返回新 board）：
+  - `createBoard()` → 15×15 `(Stone | null)[][]`
+  - `placeStone(board, row, col, stone)` → `{ ok: true, board } | { ok: false, reason }`
+  - `hasFiveInARow(board, stone)` → boolean（含 ≥5 子连续判定）
+  - `clearWinningLines(board, stone, rng)` → `{ board, clearedSelf, removedFromOpponents }`
+    - 收集己方所有 ≥5 连珠的格子（去重）一次性清掉
+    - 然后从每个对手随机抽 `clearedSelf` 颗棋子也清掉
+    - rng 注入便于测试用确定性 mock
+  - `scoreForClear(clearedSelf)` → `Math.max(0, clearedSelf - 4)`（单 5 连 = 1 分；6 连 = 2；双线交叉 = 更多）
+  - `isBoardEmpty(board)` → boolean（用于"开局让 AI 走中心"等场景）
+- [ ] `src/worker/game/ai.ts`：
+  - `randomMove(board)` → `[row, col] | null`
+  - `smartMove(board, self, opponent)` → `[row, col]` —— 启发式评分（活四/冲四/活三/眠三/活二），不要 Monte Carlo
 - [ ] Vitest 单元测试，覆盖：
-  - 水平/垂直/两条对角线五连必胜
+  - 水平/垂直/两条对角线 ≥5 连珠都能检出
+  - 一条 5 连珠：clearedSelf=5、score=1、对手随机被抽 5 颗（用 mock rng 断言确定性）
+  - 6 连珠（一条延长）：clearedSelf=6、score=2
+  - 双线交叉（同一颗子属于水平 + 垂直两条 5 连）：clearedSelf 去重正确
+  - 对手棋子不足 N 颗时，全部清掉，不报错
   - 越界、占位返回错误
-  - 平局检测（空格为 0）
-  - AI 在空棋盘返回中心点
-  - AI 能挡住对手活四
+  - `placeStone` 是纯函数：原 board 不被修改
+  - AI 在空棋盘倾向中心区域
+  - smartMove 优先阻挡对方活四
+  - smartMove 若有自己的活四会直接成连而不是去挡
 
-**验收**：`npm test` 全绿
+**验收**：`npm test` 全绿，`board.ts` 和 `ai.ts` 行覆盖率 ≥ 90%
 
 ### M2：用户名认领 + KV（半天）
 - [ ] `src/worker/kv/users.ts`：`claim(username, providedToken?)`、`rename(...)`、`getUser(username)`、`updateScore(...)`
@@ -288,23 +311,25 @@ AI 仅在"对人机"模式中由 DO 在玩家落子后立即调用 —— 不需
 4. 主页 → 改名 → 名字立即更新且 token 保持（积分不丢）
 
 ### M3：单机人机对战（1 天）
-- [ ] 前端 `Board` 组件：15×15 棋盘、点击落子
-- [ ] 本地 React state 管理 game state
-- [ ] AI 调用走前端 worker 而非 server side？**不**，AI 跑在 Worker 上 —— POST `/api/single/move` 返回 AI 应手。这保证棋力一致、便于后续接入更复杂 AI。
-- [ ] 胜局时调 `/api/poem/random` 显示古诗 + 更新积分（POST `/api/score`）
+- [ ] 前端 `Board` 组件：15×15 棋盘、点击落子（已落子位变灰，禁止重落）
+- [ ] 本地 React state 持有 board / turn / 双方累积积分；后端不持久化单机局
+- [ ] AI 跑在 Worker 上 —— POST `/api/single/move { board, self, opponent, difficulty }` 返回 AI 应手坐标。保证棋力一致、便于后续接入更复杂 AI
+- [ ] 五连珠触发"清连珠"动画 + 古诗弹层 + 双方积分变化提示
+- [ ] "结束本局"按钮：把本局最终自方积分调 `/api/score { delta }` 累加到 KV 排行榜
 - [ ] AI 难度切换（random / smart）
 
-**验收**：能完整玩一局人机对战，胜局后古诗 + 排行榜出现自己
+**验收**：能玩一局连续模式（出现 ≥ 1 次清连珠事件且对方棋子被随机抽掉），结束本局后排行榜出现自己
 
 ### M4：Durable Object 房间 + WebSocket（1.5 天）
 - [ ] `src/worker/do/GameRoom.ts`：继承 `DurableObject`，实现 `fetch`（处理 WS upgrade）、`webSocketMessage`、`webSocketClose`
 - [ ] 用 **Hibernation API**：`ctx.acceptWebSocket(ws)`
-- [ ] `webSocketMessage` 内部 dispatch：`join` / `place` / `resign`，Zod 校验
+- [ ] `webSocketMessage` 内部 dispatch：`join` / `place` / `resign` / `endRound`，Zod 校验
+- [ ] **连续模式**：连珠后清线 + 扰乱对手，棋局不结束；任一玩家发 `resign` 或 `endRound` 才结算并写榜
 - [ ] `/api/room` 创建房间（生成 6 位房间号，返回）
 - [ ] WS 客户端 hook `useWebSocket(roomCode)` 负责连接、重连、消息分发
-- [ ] 前端房间页面：分享链接、等待第二位玩家、对战 UI 与单机共用 `Board`
+- [ ] 前端房间页面：分享链接、等待第二位玩家、对战 UI 与单机共用 `Board`；清连珠动画 + 古诗弹层
 
-**验收**：两个浏览器窗口（或两台设备）能同时进入同一房间，落子实时同步，胜负判定正确
+**验收**：两个浏览器窗口能同时进入同一房间，连珠时**双方都能看到棋子被清/扰乱**、积分实时同步；任一方点结束 → 最终分写榜
 
 ### M5：排行榜 + 古诗 + 抛光（半天）
 - [ ] `/api/leaderboard` 实现 `KV.list({ prefix: "user:" })` 聚合 + 排序 + 截取 top 50
@@ -405,7 +430,7 @@ AI 仅在"对人机"模式中由 DO 在玩家落子后立即调用 —— 不需
 | 4 | SQLite-backed DO 而非 KV-backed | KV-backed DO | SQLite DO 在免费计划，KV-backed 即将停用 |
 | 5 | 默认一键随机昵称，自定义昵称仅作为可选入口 | 强制用户输入名字 / 用户名+密码 / OAuth | 即时小游戏的核心是"打开就玩"。强制输入名字本身就是门槛 —— 让系统帮用户起名，需要时再改 |
 | 6 | 房间号 6 位 base32 而非 UUID | UUID | 用户体验 —— 短码方便分享给朋友 |
-| 7 | 改回标准五子棋规则 | 保留原"清除连珠"规则 | 原规则非标准且 score 计算诡异；标准规则更直觉 |
+| 7 | 保留"清连珠 + 扰乱对手"非标准规则（核心特色） | 改回标准五子棋 | 原项目的独特卖点：连珠不是终点而是计分事件，棋盘永远不下满，鼓励"做形"。score = `clearedCount − 4` 来自原版本，能放大复式连珠（fork）的收益，保留 |
 
 ---
 

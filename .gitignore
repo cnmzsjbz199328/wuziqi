@@ -1,0 +1,6 @@
+# Per-subproject ignores live with their respective .gitignore files.
+# This file only catches accidents at the repo root.
+
+node_modules/
+*.log
+.DS_Store

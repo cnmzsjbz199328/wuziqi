@@ -8,6 +8,12 @@ export const WIN_COUNT = 5;
 export const StoneSchema = z.enum(["black", "white"]);
 export type Stone = z.infer<typeof StoneSchema>;
 
+export const CellSchema = z.union([StoneSchema, z.null()]);
+export type Cell = z.infer<typeof CellSchema>;
+
+export const BoardSchema = z.array(z.array(CellSchema));
+export type Board = z.infer<typeof BoardSchema>;
+
 export const GameStatusSchema = z.enum(["waiting", "playing", "finished"]);
 export type GameStatus = z.infer<typeof GameStatusSchema>;
 
@@ -103,7 +109,7 @@ export type PublicPlayer = z.infer<typeof PublicPlayerSchema>;
 
 export const ServerStateSchema = z.object({
 	type: z.literal("state"),
-	board: z.array(z.array(z.union([StoneSchema, z.null()]))),
+	board: BoardSchema,
 	turn: StoneSchema,
 	players: z.array(PublicPlayerSchema),
 	status: GameStatusSchema,
