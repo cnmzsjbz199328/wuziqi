@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Board } from "./components/Board";
+import { LobbyWidget } from "./components/LobbyWidget";
+import { SignInCard } from "./components/SignInCard";
 import { UserBadge } from "./components/UserBadge";
-import { WelcomeModal } from "./components/WelcomeModal";
 import { useIdentity } from "./hooks/useIdentity";
 import { ApiError, api } from "./lib/api";
 import { GamePage } from "./pages/GamePage";
 import {
+	BOARD_SIZE,
 	RoomCodeSchema,
+	type Board as BoardType,
+	type Cell,
 	type RoomVisibility,
 } from "../shared/protocol";
 
@@ -31,6 +36,13 @@ function writeStoredRoom(code: string | null) {
 	}
 }
 
+// A 15x15 grid of empty cells used as the board placeholder before
+// sign-in (or while the room is being created). The user sees the
+// product immediately — board + lobby — without a blocking modal.
+const EMPTY_BOARD: BoardType = Array.from({ length: BOARD_SIZE }, () =>
+	Array.from({ length: BOARD_SIZE }, (): Cell => null)
+);
+
 function App() {
 	const { state, claimRandom, claimCustom, renameTo, signOut } = useIdentity();
 
@@ -38,8 +50,6 @@ function App() {
 	const [busy, setBusy] = useState(false);
 	const [appError, setAppError] = useState<string | null>(null);
 
-	// Survives StrictMode's double-effect in dev so we don't fire two
-	// createRoom requests on first mount.
 	const bootstrappingRef = useRef(false);
 
 	const switchRoom = useCallback((code: string) => {
@@ -68,9 +78,8 @@ function App() {
 		[state, busy, switchRoom]
 	);
 
-	// First-time landing: rehydrate the last room from localStorage, or
-	// auto-create a private room so the user lands directly on a board
-	// without any "pick a mode" intermediate page.
+	// After identity claim, rehydrate the last room (or auto-create a
+	// private one) so the user lands directly on a playable board.
 	useEffect(() => {
 		if (state.status !== "ready") return;
 		if (roomCode !== null) return;
@@ -100,12 +109,13 @@ function App() {
 		})();
 	}, [state, roomCode]);
 
-	// Sign-out clears the room memory so the next user lands fresh.
 	const handleSignOut = useCallback(() => {
 		writeStoredRoom(null);
 		setRoomCode(null);
 		signOut();
 	}, [signOut]);
+
+	const isReady = state.status === "ready" && roomCode !== null;
 
 	return (
 		<div className="min-h-screen bg-stone-900 text-stone-100">
@@ -121,31 +131,26 @@ function App() {
 			</header>
 
 			<main className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
-				{state.status === "ready" && roomCode ? (
+				{isReady ? (
 					<GamePage
 						identity={state.identity}
-						roomCode={roomCode}
+						roomCode={roomCode!}
 						busy={busy}
 						onCreateRoom={createRoom}
 						onJoinRoom={switchRoom}
 					/>
-				) : state.status === "ready" ? (
-					<p className="text-stone-500 text-sm text-center py-8">
-						进入房间中…
-					</p>
-				) : null}
+				) : (
+					<LandingShell
+						anonymous={state.status === "anonymous"}
+						onRandom={async () => {
+							await claimRandom();
+						}}
+						onCustom={async (name) => {
+							await claimCustom(name);
+						}}
+					/>
+				)}
 			</main>
-
-			{state.status === "anonymous" && (
-				<WelcomeModal
-					onRandom={async () => {
-						await claimRandom();
-					}}
-					onCustom={async (name) => {
-						await claimCustom(name);
-					}}
-				/>
-			)}
 
 			{appError && (
 				<div
@@ -161,6 +166,56 @@ function App() {
 						: appError}
 				</div>
 			)}
+		</div>
+	);
+}
+
+/**
+ * The two-column shell rendered before a real game is connected:
+ * empty board on the left, SignInCard (or a loading note) + lobby on
+ * the right. Matches the layout the logged-in GamePage uses so the
+ * transition into a live game doesn't shift the page around.
+ */
+function LandingShell({
+	anonymous,
+	onRandom,
+	onCustom,
+}: {
+	anonymous: boolean;
+	onRandom: () => Promise<void>;
+	onCustom: (name: string) => Promise<void>;
+}) {
+	return (
+		<div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4 lg:gap-6">
+			<div className="space-y-3">
+				<div className="text-center text-base font-medium text-stone-400">
+					{anonymous ? "取个名字就能下子" : "正在分配房间…"}
+				</div>
+				<div className="max-w-xl mx-auto">
+					<Board
+						board={EMPTY_BOARD}
+						lastMove={null}
+						disabled
+						onPlace={() => {}}
+					/>
+				</div>
+				<p className="text-stone-500 text-xs text-center px-2">
+					五连成线 → 清除己方连子,每位对手随机被扰乱相同数量。先达 5 分者胜。
+				</p>
+			</div>
+
+			<aside className="space-y-3">
+				{anonymous ? (
+					<SignInCard onRandom={onRandom} onCustom={onCustom} />
+				) : (
+					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3">
+						<p className="text-stone-400 text-sm">连接房间中…</p>
+					</section>
+				)}
+				{/* No-op join handler — the user must sign in before joining
+				    anything; clicks fall through to a passive preview. */}
+				<LobbyWidget currentRoom="" onJoinRoom={() => {}} />
+			</aside>
 		</div>
 	);
 }
