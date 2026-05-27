@@ -115,7 +115,18 @@ function App() {
 		signOut();
 	}, [signOut]);
 
-	const isReady = state.status === "ready" && roomCode !== null;
+	const identity = state.status === "ready" ? state.identity : null;
+
+	const randomSignIn = useCallback(async () => {
+		await claimRandom();
+	}, [claimRandom]);
+
+	const customSignIn = useCallback(
+		async (name: string) => {
+			await claimCustom(name);
+		},
+		[claimCustom]
+	);
 
 	return (
 		<div className="min-h-screen bg-stone-900 text-stone-100">
@@ -131,23 +142,22 @@ function App() {
 			</header>
 
 			<main className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
-				{isReady ? (
+				{roomCode ? (
 					<GamePage
-						identity={state.identity}
-						roomCode={roomCode!}
+						identity={identity}
+						roomCode={roomCode}
 						busy={busy}
 						onCreateRoom={createRoom}
 						onJoinRoom={switchRoom}
+						onRandomSignIn={randomSignIn}
+						onCustomSignIn={customSignIn}
 					/>
 				) : (
 					<LandingShell
 						anonymous={state.status === "anonymous"}
-						onRandom={async () => {
-							await claimRandom();
-						}}
-						onCustom={async (name) => {
-							await claimCustom(name);
-						}}
+						onRandom={randomSignIn}
+						onCustom={customSignIn}
+						onJoinRoom={switchRoom}
 					/>
 				)}
 			</main>
@@ -180,16 +190,20 @@ function LandingShell({
 	anonymous,
 	onRandom,
 	onCustom,
+	onJoinRoom,
 }: {
 	anonymous: boolean;
 	onRandom: () => Promise<void>;
 	onCustom: (name: string) => Promise<void>;
+	onJoinRoom: (code: string) => void;
 }) {
 	return (
 		<div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4 lg:gap-6">
 			<div className="space-y-3">
 				<div className="text-center text-base font-medium text-stone-400">
-					{anonymous ? "取个名字就能下子" : "正在分配房间…"}
+					{anonymous
+						? "点击右侧公开房间观战,或先登记昵称开局"
+						: "正在分配房间…"}
 				</div>
 				<div className="max-w-xl mx-auto">
 					<Board
@@ -212,9 +226,10 @@ function LandingShell({
 						<p className="text-stone-400 text-sm">连接房间中…</p>
 					</section>
 				)}
-				{/* No-op join handler — the user must sign in before joining
-				    anything; clicks fall through to a passive preview. */}
-				<LobbyWidget currentRoom="" onJoinRoom={() => {}} />
+				{/* Clicking a public room moves the user into spectator
+				    mode (anonymous) or seats them (signed-in) — the
+				    GamePage branch handles both via useMultiPlayerGame. */}
+				<LobbyWidget currentRoom="" onJoinRoom={onJoinRoom} />
 			</aside>
 		</div>
 	);

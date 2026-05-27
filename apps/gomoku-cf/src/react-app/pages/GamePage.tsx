@@ -4,16 +4,19 @@ import { EndScreen } from "../components/EndScreen";
 import { LobbyWidget } from "../components/LobbyWidget";
 import { PlayerList, paletteForPlayers } from "../components/PlayerList";
 import { RoomWidget } from "../components/RoomWidget";
+import { SignInCard } from "../components/SignInCard";
 import type { Identity } from "../hooks/useIdentity";
 import { useMultiPlayerGame } from "../hooks/useMultiPlayerGame";
 import type { RoomVisibility } from "../../shared/protocol";
 
 interface Props {
-	identity: Identity;
+	identity: Identity | null;
 	roomCode: string;
 	busy: boolean;
 	onCreateRoom: (visibility: RoomVisibility) => void;
 	onJoinRoom: (code: string) => void;
+	onRandomSignIn: () => Promise<void>;
+	onCustomSignIn: (name: string) => Promise<void>;
 }
 
 export function GamePage({
@@ -22,11 +25,14 @@ export function GamePage({
 	busy,
 	onCreateRoom,
 	onJoinRoom,
+	onRandomSignIn,
+	onCustomSignIn,
 }: Props) {
 	const {
 		connection,
 		state,
 		isMyTurn,
+		isSpectator,
 		lastClear,
 		lastTimeout,
 		lastEnd,
@@ -35,16 +41,28 @@ export function GamePage({
 		restart,
 	} = useMultiPlayerGame({
 		roomCode,
-		username: identity.username,
-		token: identity.token,
+		username: identity?.username ?? null,
+		token: identity?.token ?? null,
 	});
+
+	const [signInHintAt, setSignInHintAt] = useState(0);
+
+	const handlePlace = (row: number, col: number) => {
+		if (isSpectator) {
+			setSignInHintAt(Date.now());
+			return;
+		}
+		place(row, col);
+	};
 
 	const turnLabel = !state ? (
 		"连接中…"
 	) : state.status === "finished" ? (
 		"本轮结束"
 	) : state.status === "waiting" ? (
-		"等待玩家加入…"
+		isSpectator ? "等待玩家加入…(观战中)" : "等待玩家加入…"
+	) : isSpectator ? (
+		state.turn ? `观战中 · 轮到 ${state.turn}` : "观战中"
 	) : isMyTurn ? (
 		"轮到你"
 	) : state.turn ? (
@@ -76,8 +94,16 @@ export function GamePage({
 									? { row: state.lastMove.row, col: state.lastMove.col }
 									: null
 							}
-							disabled={!isMyTurn || state.status !== "playing"}
-							onPlace={place}
+							/* Spectators get the board active enough to consume
+							   clicks (so handlePlace can surface the sign-in
+							   hint) but logically can't change state. Players
+							   are gated by their own turn + status as before. */
+							disabled={
+								isSpectator
+									? state.status !== "playing"
+									: !isMyTurn || state.status !== "playing"
+							}
+							onPlace={handlePlace}
 							palette={paletteForPlayers(state.players)}
 						/>
 					) : (
@@ -92,14 +118,29 @@ export function GamePage({
 
 			{/* Right sidebar */}
 			<aside className="space-y-3 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto lg:pr-1">
-				<RoomWidget
-					roomCode={roomCode}
-					visibility={state?.visibility ?? null}
-					connection={connection}
-					busy={busy}
-					onCreateRoom={onCreateRoom}
-					onJoinRoom={onJoinRoom}
-				/>
+				{isSpectator ? (
+					<SignInCard onRandom={onRandomSignIn} onCustom={onCustomSignIn} />
+				) : (
+					<RoomWidget
+						roomCode={roomCode}
+						visibility={state?.visibility ?? null}
+						connection={connection}
+						busy={busy}
+						onCreateRoom={onCreateRoom}
+						onJoinRoom={onJoinRoom}
+					/>
+				)}
+
+				{isSpectator && (
+					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3 text-xs text-stone-400">
+						房间 <span className="font-mono tracking-widest text-stone-200">{roomCode}</span>
+						{state?.visibility && (
+							<span className={`ml-2 px-1.5 py-0.5 rounded ${state.visibility === "public" ? "bg-emerald-900/60 text-emerald-300" : "bg-indigo-900/60 text-indigo-300"}`}>
+								{state.visibility === "public" ? "公开" : "私人"}
+							</span>
+						)}
+					</section>
+				)}
 
 				{state && state.players.length > 0 && (
 					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3">
@@ -109,7 +150,7 @@ export function GamePage({
 						<PlayerList
 							players={state.players}
 							turn={state.turn}
-							me={identity.username}
+							me={identity?.username ?? ""}
 						/>
 					</section>
 				)}
@@ -117,18 +158,39 @@ export function GamePage({
 				<LobbyWidget currentRoom={roomCode} onJoinRoom={onJoinRoom} />
 			</aside>
 
-			<ClearBanner event={lastClear} me={identity.username} />
+			<ClearBanner event={lastClear} me={identity?.username ?? ""} />
 			<TimeoutBanner event={lastTimeout} />
 			<ErrorBanner message={errorMsg} />
+			<SignInHint key={signInHintAt} visible={signInHintAt > 0} />
 
-			{lastEnd && state?.status === "finished" && (
+			{!isSpectator && lastEnd && state?.status === "finished" && (
 				<EndScreen
 					event={lastEnd}
-					me={identity.username}
+					me={identity?.username ?? ""}
 					onRestart={restart}
 					onLeave={() => onCreateRoom("private")}
 				/>
 			)}
+		</div>
+	);
+}
+
+function SignInHint({ visible }: { visible: boolean }) {
+	const [dismissed, setDismissed] = useState(false);
+	useEffect(() => {
+		setDismissed(false);
+		if (!visible) return;
+		const h = window.setTimeout(() => setDismissed(true), 3500);
+		return () => window.clearTimeout(h);
+	}, [visible]);
+	if (!visible || dismissed) return null;
+	return (
+		<div
+			role="status"
+			className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-lg shadow-lg border bg-emerald-900/90 border-emerald-700 text-emerald-50 text-sm text-center"
+		>
+			<div className="font-medium">想下子?</div>
+			<div className="opacity-90 mt-0.5">右侧"取个名字"登记后即可</div>
 		</div>
 	);
 }

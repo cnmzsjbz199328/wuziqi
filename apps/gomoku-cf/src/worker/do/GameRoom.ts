@@ -81,8 +81,17 @@ interface StoredPlayer {
 	score: number; // accumulated in this room only
 }
 
+/**
+ * Identifies the human (or lack thereof) behind a hibernating WebSocket.
+ *   - `username: string`  → seated player; can send place/restart, counts
+ *     toward connectedUsernames() so the room stays warm and the bot
+ *     keeps ticking against them.
+ *   - `username: null`    → spectator; receives state/move/clear/end
+ *     broadcasts but place/restart are rejected with a "spectator"
+ *     error. Does NOT keep the room alive (room_gc still fires).
+ */
 interface WsAttachment {
-	username: string;
+	username: string | null;
 }
 
 export class GameRoom extends DurableObject<Env> {
@@ -187,40 +196,56 @@ export class GameRoom extends DurableObject<Env> {
 			return new Response("Expected WebSocket", { status: 400 });
 		}
 		const url = new URL(request.url);
-		const username = url.searchParams.get("username") ?? "";
-		const token = url.searchParams.get("token") ?? "";
-		if (!username || !token) {
-			return new Response("Missing credentials", { status: 400 });
-		}
-
-		const user = await getUser(this.env.KV, username);
-		if (!user || user.token !== token) {
-			return new Response("Unauthorized", { status: 401 });
-		}
+		const username = url.searchParams.get("username");
+		const token = url.searchParams.get("token");
 
 		const meta = await this.storage().get<StoredMeta>("meta");
 		if (!meta) {
 			return new Response("Room not found", { status: 404 });
 		}
 
-		// Seat the player if they're new; otherwise mark them as
-		// reconnected (the per-connection presence is derived from the
-		// active WebSocket set, so no flag is needed in storage).
-		const seatResult = await this.ensureSeat(username);
-		if (!seatResult.ok) {
-			return new Response(seatResult.reason, { status: 409 });
+		// Two flavours of WS:
+		//   - Both creds present → authenticated seat. Validate token,
+		//     ensureSeat (might 409 on a full room), broadcast updated
+		//     state and reschedule the alarm since the connect can flip
+		//     the room out of room_gc territory.
+		//   - Neither present     → spectator. Accept the socket, push
+		//     current state. Spectators don't keep the room warm and
+		//     can't send place/restart (rejected in webSocketMessage).
+		//   - Exactly one present → malformed; refuse so it doesn't
+		//     silently degrade.
+		let attachedUsername: string | null = null;
+		if (username || token) {
+			if (!username || !token) {
+				return new Response("Missing credentials", { status: 400 });
+			}
+			const user = await getUser(this.env.KV, username);
+			if (!user || user.token !== token) {
+				return new Response("Unauthorized", { status: 401 });
+			}
+			const seatResult = await this.ensureSeat(username);
+			if (!seatResult.ok) {
+				return new Response(seatResult.reason, { status: 409 });
+			}
+			attachedUsername = username;
 		}
 
 		const pair = new WebSocketPair();
 		const [client, server] = Object.values(pair);
-		server.serializeAttachment({ username } satisfies WsAttachment);
+		server.serializeAttachment({
+			username: attachedUsername,
+		} satisfies WsAttachment);
 		this.ctx.acceptWebSocket(server);
 
 		// First state push happens after acceptWebSocket so this socket
 		// is included in the broadcast.
-		await this.maybeStartPlaying();
+		if (attachedUsername) {
+			await this.maybeStartPlaying();
+		}
 		await this.broadcastState();
-		await this.rescheduleAlarm();
+		if (attachedUsername) {
+			await this.rescheduleAlarm();
+		}
 
 		return new Response(null, { status: 101, webSocket: client });
 	}
@@ -600,8 +625,11 @@ export class GameRoom extends DurableObject<Env> {
 		raw: string | ArrayBuffer
 	): Promise<void> {
 		const att = ws.deserializeAttachment() as WsAttachment | null;
-		if (!att?.username) {
-			ws.close(1008, "unauthenticated");
+		// Note: spectator sockets have att.username === null and are
+		// allowed to stay open — they just can't send action messages.
+		// Only a missing attachment (corrupt socket) gets closed.
+		if (!att) {
+			ws.close(1008, "no_attachment");
 			return;
 		}
 		const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
@@ -609,7 +637,7 @@ export class GameRoom extends DurableObject<Env> {
 		try {
 			msg = JSON.parse(text);
 		} catch {
-			this.sendErrorTo(att.username, "bad_json", "Could not parse message");
+			this.sendErrorToWs(ws, "bad_json", "Could not parse message");
 			return;
 		}
 		if (
@@ -618,10 +646,25 @@ export class GameRoom extends DurableObject<Env> {
 			!("type" in msg) ||
 			typeof (msg as { type: unknown }).type !== "string"
 		) {
-			this.sendErrorTo(att.username, "bad_message", "Malformed message");
+			this.sendErrorToWs(ws, "bad_message", "Malformed message");
 			return;
 		}
 		const m = msg as { type: string; row?: number; col?: number };
+
+		// Spectator gating: actions require a seated identity. We tell
+		// the client which code to react on so the UI can prompt the
+		// guest to sign in instead of silently dropping the move.
+		if (m.type === "place" || m.type === "restart" || m.type === "resign") {
+			if (!att.username) {
+				this.sendErrorToWs(
+					ws,
+					"spectator_only",
+					"请先登记昵称才能下子"
+				);
+				return;
+			}
+		}
+
 		if (m.type === "place") {
 			if (
 				typeof m.row !== "number" ||
@@ -629,10 +672,10 @@ export class GameRoom extends DurableObject<Env> {
 				!Number.isInteger(m.row) ||
 				!Number.isInteger(m.col)
 			) {
-				this.sendErrorTo(att.username, "bad_place", "row/col required");
+				this.sendErrorToWs(ws, "bad_place", "row/col required");
 				return;
 			}
-			await this.handlePlace(att.username, m.row, m.col);
+			await this.handlePlace(att.username!, m.row, m.col);
 			return;
 		}
 		if (m.type === "join") {
@@ -642,16 +685,24 @@ export class GameRoom extends DurableObject<Env> {
 			return;
 		}
 		if (m.type === "restart") {
-			await this.restartRound(att.username);
+			await this.restartRound(att.username!);
 			return;
 		}
 		if (m.type === "resign") {
-			// Resign disconnects the player; their seat is held for reconnect.
-			// True forfeit / score adjustment lives in a future milestone.
 			ws.close(1000, "resigned");
 			return;
 		}
-		this.sendErrorTo(att.username, "unknown_type", `Unknown type: ${m.type}`);
+		this.sendErrorToWs(ws, "unknown_type", `Unknown type: ${m.type}`);
+	}
+
+	private sendErrorToWs(ws: WebSocket, code: string, message: string): void {
+		try {
+			ws.send(
+				JSON.stringify({ type: "error", code, message } satisfies ServerMessage)
+			);
+		} catch {
+			// ignore — socket may be mid-close
+		}
 	}
 
 	async webSocketClose(): Promise<void> {

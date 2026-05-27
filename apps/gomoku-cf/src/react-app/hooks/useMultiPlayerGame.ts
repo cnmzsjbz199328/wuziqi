@@ -47,8 +47,14 @@ export interface EndEvent {
 
 interface Options {
 	roomCode: string;
-	username: string;
-	token: string;
+	/**
+	 * Credentials of the signed-in user, or null for spectator mode.
+	 * When null, the WS upgrade omits both query params; the DO accepts
+	 * the connection, streams state/move/clear/end broadcasts, but
+	 * rejects any place/restart/resign with a "spectator_only" error.
+	 */
+	username: string | null;
+	token: string | null;
 }
 
 const RECONNECT_MS = 2000;
@@ -73,9 +79,13 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 	const connect = useCallback(() => {
 		cancelledRef.current = false;
 		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-		const url = `${proto}//${window.location.host}/api/room/${roomCode}/ws?username=${encodeURIComponent(
-			username
-		)}&token=${encodeURIComponent(token)}`;
+		// Anonymous connect omits both query params — the DO interprets
+		// that as a spectator-mode upgrade.
+		const auth =
+			username && token
+				? `?username=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`
+				: "";
+		const url = `${proto}//${window.location.host}/api/room/${roomCode}/ws${auth}`;
 		setConnection("connecting");
 		setErrorMsg(null);
 		const ws = new WebSocket(url);
@@ -181,17 +191,24 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		};
 	}, [connect]);
 
-	const place = useCallback((row: number, col: number) => {
-		const ws = wsRef.current;
-		if (!ws || ws.readyState !== WebSocket.OPEN) return;
-		ws.send(JSON.stringify({ type: "place", row, col }));
-	}, []);
+	const isSpectator = !username || !token;
+
+	const place = useCallback(
+		(row: number, col: number) => {
+			if (isSpectator) return; // UI surfaces the sign-in prompt; just no-op here.
+			const ws = wsRef.current;
+			if (!ws || ws.readyState !== WebSocket.OPEN) return;
+			ws.send(JSON.stringify({ type: "place", row, col }));
+		},
+		[isSpectator]
+	);
 
 	const restart = useCallback(() => {
+		if (isSpectator) return;
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN) return;
 		ws.send(JSON.stringify({ type: "restart" }));
-	}, []);
+	}, [isSpectator]);
 
 	// Also drop lastMove on restart so the new round opens with a clean
 	// indicator rather than the previous round's final dot.
@@ -213,14 +230,16 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		wsRef.current = null;
 	}, []);
 
-	const me = state?.players.find((p) => p.username === username) ?? null;
-	const isMyTurn = state?.turn === username;
+	const me =
+		username ? (state?.players.find((p) => p.username === username) ?? null) : null;
+	const isMyTurn = !!username && state?.turn === username;
 
 	return {
 		connection,
 		state,
 		me,
 		isMyTurn,
+		isSpectator,
 		lastClear,
 		lastTimeout,
 		lastEnd,
