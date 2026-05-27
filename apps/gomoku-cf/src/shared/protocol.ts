@@ -4,11 +4,18 @@ import { z } from "zod";
 
 export const BOARD_SIZE = 15;
 export const WIN_COUNT = 5;
+export const MAX_HUMANS_PER_ROOM = 4;
+export const BOT_USERNAME = "Bot";
 
+// Legacy stone tag used by the local single-player page; multi-player
+// uses player usernames as cell markers instead. Both are valid
+// CellSchema values (any non-empty string identifier).
 export const StoneSchema = z.enum(["black", "white"]);
 export type Stone = z.infer<typeof StoneSchema>;
 
-export const CellSchema = z.union([StoneSchema, z.null()]);
+// A cell holds a player identifier (a username, or one of the legacy
+// "black"/"white" tags for single-player local state) or null when empty.
+export const CellSchema = z.string().min(1).nullable();
 export type Cell = z.infer<typeof CellSchema>;
 
 export const BoardSchema = z.array(z.array(CellSchema));
@@ -31,6 +38,21 @@ export const TokenSchema = z.string().length(128).regex(/^[a-f0-9]+$/);
 
 // 6-char base32 (Crockford minus 0/O/1/I/L, plus letters).
 export const RoomCodeSchema = z.string().length(6).regex(/^[A-HJ-NP-Z2-9]+$/);
+
+// Up to 5 seats per room (4 humans + 1 bot); each seat gets a distinct
+// color drawn from this palette. The bot always sits last and gets the
+// final slot (amber).
+export const PlayerColorSchema = z.enum([
+	"black",
+	"white",
+	"red",
+	"blue",
+	"amber",
+]);
+export type PlayerColor = z.infer<typeof PlayerColorSchema>;
+
+export const RoomVisibilitySchema = z.enum(["public", "private"]);
+export type RoomVisibility = z.infer<typeof RoomVisibilitySchema>;
 
 // ---------- REST request/response schemas ----------
 
@@ -78,13 +100,30 @@ export type UserStats = z.infer<typeof UserStatsSchema>;
 export const CreateRoomRequestSchema = z.object({
 	username: UsernameSchema,
 	token: TokenSchema,
+	visibility: RoomVisibilitySchema,
 });
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequestSchema>;
 
 export const CreateRoomResponseSchema = z.object({
 	roomCode: RoomCodeSchema,
+	visibility: RoomVisibilitySchema,
 });
 export type CreateRoomResponse = z.infer<typeof CreateRoomResponseSchema>;
+
+// Public lobby view — only includes public rooms; visibility is omitted
+// because every entry in the list is by definition public.
+export const RoomSummarySchema = z.object({
+	code: RoomCodeSchema,
+	status: GameStatusSchema,
+	playerCount: z.number().int().min(0).max(MAX_HUMANS_PER_ROOM + 1),
+	players: z.array(UsernameSchema),
+});
+export type RoomSummary = z.infer<typeof RoomSummarySchema>;
+
+export const ListRoomsResponseSchema = z.object({
+	rooms: z.array(RoomSummarySchema),
+});
+export type ListRoomsResponse = z.infer<typeof ListRoomsResponseSchema>;
 
 export const LeaderboardEntrySchema = z.object({
 	username: UsernameSchema,
@@ -126,32 +165,48 @@ export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 
 // ---------- WebSocket messages: server → client ----------
 
-export const PublicPlayerSchema = z.object({
+export const RoomPlayerSchema = z.object({
 	username: UsernameSchema,
-	stone: StoneSchema,
+	color: PlayerColorSchema,
+	isBot: z.boolean(),
+	connected: z.boolean(),
+	score: z.number().int().nonnegative(),
 });
-export type PublicPlayer = z.infer<typeof PublicPlayerSchema>;
+export type RoomPlayer = z.infer<typeof RoomPlayerSchema>;
 
 export const ServerStateSchema = z.object({
 	type: z.literal("state"),
 	board: BoardSchema,
-	turn: StoneSchema,
-	players: z.array(PublicPlayerSchema),
+	players: z.array(RoomPlayerSchema),
+	// Username of the player whose turn it is; null when status != "playing".
+	turn: UsernameSchema.nullable(),
 	status: GameStatusSchema,
+	visibility: RoomVisibilitySchema,
 });
 
 export const ServerMoveSchema = z.object({
 	type: z.literal("move"),
 	row: z.number().int(),
 	col: z.number().int(),
-	by: StoneSchema,
+	by: UsernameSchema,
 });
 
-export const ServerWinSchema = z.object({
-	type: z.literal("win"),
-	winner: UsernameSchema,
-	stone: StoneSchema,
-	poem: PoemSchema,
+// Sent right after a move that triggered the 5-in-a-row clear+disrupt rule.
+// The state message that follows it carries the post-clear board.
+export const ServerClearSchema = z.object({
+	type: z.literal("clear"),
+	by: UsernameSchema,
+	clearedSelf: z.number().int().nonnegative(),
+	// username → number-of-stones-removed for every other player on board.
+	removedFromOpponents: z.record(UsernameSchema, z.number().int().nonnegative()),
+	pointsAwarded: z.number().int().nonnegative(),
+});
+
+// Optional flourish on round end (currently unused but reserved for M5).
+export const ServerEndSchema = z.object({
+	type: z.literal("end"),
+	finalScores: z.record(UsernameSchema, z.number().int().nonnegative()),
+	poem: PoemSchema.optional(),
 });
 
 export const ServerErrorSchema = z.object({
@@ -163,7 +218,8 @@ export const ServerErrorSchema = z.object({
 export const ServerMessageSchema = z.discriminatedUnion("type", [
 	ServerStateSchema,
 	ServerMoveSchema,
-	ServerWinSchema,
+	ServerClearSchema,
+	ServerEndSchema,
 	ServerErrorSchema,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;

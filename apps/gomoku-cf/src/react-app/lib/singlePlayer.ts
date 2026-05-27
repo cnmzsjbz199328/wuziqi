@@ -21,7 +21,8 @@ export interface ClearEvent {
 	id: number;
 	by: Stone;
 	clearedSelf: number;
-	removedFromOpponents: Partial<Record<Stone, number>>;
+	/** Keyed by opposing marker — for single-player that's just the AI stone. */
+	removedFromOpponents: Record<string, number>;
 	/** Points awarded to the local player (0 when the AI triggered the clear). */
 	playerScoreDelta: number;
 }
