@@ -24,7 +24,9 @@ wuziqi/
 | `User.java` + `UserPool.java` | Data shape for users (`username` + `score`). Persistence in the original was a no-op; in the rewrite we use KV. |
 | `Poem/Poem.java` + `Poem/PoemService.java` | Has the inlined poem strings used as the win-screen flourish. M5 will copy these into a KV seed. |
 
-Everything else from the original tree (`build.gradle`, `gradlew`, Spring `*Application` / `*Controller` / `*Config` classes, `Main.java`, `GameMove.java`, the `resources/` directory with `schema.sql` / `data.sql` / Liquibase changelog / Thymeleaf templates / static HTML+JS, the `src/test/` directory, the dead Docker+Render GitHub workflow, and Windows `.lnk` shortcuts) has been deleted from this branch. The `master`/`main` branch still has them if you need to dig.
+`Gomoku/legacy-frontend/` holds a snapshot of the old static frontend (`index.html`, `script.js`, `style.css`) plus a short `README.md` indexing what's worth lifting — the typewriter poem reveal in `style.css:102-126` triggered by `script.js:45-62` is the main one. **Do not run or import it**; it's read-only animation reference.
+
+Everything else from the original tree (`build.gradle`, `gradlew`, Spring `*Application` / `*Controller` / `*Config` classes, `Main.java`, `GameMove.java`, the rest of `resources/` — `schema.sql`, `data.sql`, Liquibase changelog, Thymeleaf templates — the `src/test/` directory, the dead Docker+Render GitHub workflow, and Windows `.lnk` shortcuts) has been deleted from this branch. The `master`/`main` branch still has them if you need to dig.
 
 ## Non-standard Gomoku rules (the product's differentiator)
 
