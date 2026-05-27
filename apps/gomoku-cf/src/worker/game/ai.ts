@@ -1,4 +1,4 @@
-import { BOARD_SIZE, type Board, type Stone } from "../../shared/protocol";
+import { BOARD_SIZE, type Board } from "../../shared/protocol";
 import { inBounds, defaultRng, type Rng } from "./board";
 
 const DIRECTIONS = [
@@ -23,9 +23,9 @@ export function randomMove(board: Board, rng: Rng = defaultRng): [number, number
 }
 
 /**
- * Longest consecutive run of `stone` that would exist if we hypothetically
- * placed `stone` at (r, c), looking in both directions through (r, c) for
- * each of the 4 axes. (r, c) itself is counted as `stone` for this query.
+ * Longest consecutive run of `marker` that would exist if we hypothetically
+ * placed `marker` at (r, c), looking in both directions through (r, c) for
+ * each of the 4 axes. (r, c) itself is counted as `marker` for this query.
  *
  * Fixes the Java original's `checkLine` which only counted in one direction.
  */
@@ -33,7 +33,7 @@ function maxRunIfPlaced(
 	board: Board,
 	r: number,
 	c: number,
-	stone: Stone
+	marker: string
 ): number {
 	let best = 0;
 	for (const [dr, dc] of DIRECTIONS) {
@@ -41,13 +41,13 @@ function maxRunIfPlaced(
 		for (let i = 1; ; i++) {
 			const nr = r + i * dr;
 			const nc = c + i * dc;
-			if (!inBounds(nr, nc) || board[nr][nc] !== stone) break;
+			if (!inBounds(nr, nc) || board[nr][nc] !== marker) break;
 			count++;
 		}
 		for (let i = 1; ; i++) {
 			const nr = r - i * dr;
 			const nc = c - i * dc;
-			if (!inBounds(nr, nc) || board[nr][nc] !== stone) break;
+			if (!inBounds(nr, nc) || board[nr][nc] !== marker) break;
 			count++;
 		}
 		if (count > best) best = count;
@@ -56,25 +56,28 @@ function maxRunIfPlaced(
 }
 
 /**
- * Smart move:
+ * Smart move policy (extended for N-player rooms):
  *   1. If we can complete a 5-in-a-row (which triggers the clear + disrupt
  *      event in this game), prefer that.
- *   2. Otherwise, if the opponent would complete a 5-in-a-row by playing some
- *      cell next turn, block it.
+ *   2. Otherwise, if *any* opponent would complete a 5-in-a-row by playing
+ *      some cell next turn, block the most threatening one.
  *   3. Otherwise, maximize our own longest run (build position), with a tiny
  *      center bias to break ties.
  *
- * Cells immediately adjacent to existing stones are scanned first; only if
- * the board is empty do we play the center.
+ * `opponents` may be a single string (legacy single-player call site) or an
+ * array of opponent identifiers (multi-player). An empty array degrades
+ * gracefully to pure offence + center bias.
  *
  * Deterministic given the board (tie breaks always pick the same cell), no
  * RNG needed unless extending to randomized policies later.
  */
 export function smartMove(
 	board: Board,
-	self: Stone,
-	opponent: Stone
+	self: string,
+	opponents: string | readonly string[]
 ): [number, number] {
+	const opps = typeof opponents === "string" ? [opponents] : opponents;
+
 	let bestScore = -Infinity;
 	let bestMove: [number, number] = [Math.floor(CENTER), Math.floor(CENTER)];
 	let anyEmpty = false;
@@ -85,11 +88,15 @@ export function smartMove(
 			anyEmpty = true;
 
 			const myRun = maxRunIfPlaced(board, r, c, self);
-			const theirRun = maxRunIfPlaced(board, r, c, opponent);
+			let worstOppRun = 0;
+			for (const opp of opps) {
+				const run = maxRunIfPlaced(board, r, c, opp);
+				if (run > worstOppRun) worstOppRun = run;
+			}
 
 			// Big jumps at the 5-run threshold so completing/blocking dominates.
 			const myWeight = myRun >= 5 ? 10_000 : myRun;
-			const theirWeight = theirRun >= 5 ? 9_000 : theirRun - 0.5;
+			const theirWeight = worstOppRun >= 5 ? 9_000 : worstOppRun - 0.5;
 
 			const centerBias =
 				-((Math.abs(r - CENTER) + Math.abs(c - CENTER)) * 0.01);

@@ -1,6 +1,9 @@
 import type {
 	ClaimRequest,
 	ClaimResponse,
+	CreateRoomRequest,
+	CreateRoomResponse,
+	ListRoomsResponse,
 	RenameRequest,
 	ScoreRequest,
 	UserStats,
@@ -16,12 +19,11 @@ export class ApiError extends Error {
 	}
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-	const res = await fetch(path, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
-	});
+async function request<T>(
+	path: string,
+	init: RequestInit = {}
+): Promise<T> {
+	const res = await fetch(path, init);
 	const data = (await res.json().catch(() => null)) as
 		| { error?: string }
 		| null;
@@ -30,6 +32,18 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 		throw new ApiError(res.status, code, code);
 	}
 	return data as T;
+}
+
+function post<T>(path: string, body: unknown): Promise<T> {
+	return request<T>(path, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(body),
+	});
+}
+
+function get<T>(path: string): Promise<T> {
+	return request<T>(path, { method: "GET" });
 }
 
 export const api = {
@@ -41,5 +55,11 @@ export const api = {
 	},
 	score(req: ScoreRequest) {
 		return post<UserStats>("/api/user/score", req);
+	},
+	createRoom(req: CreateRoomRequest) {
+		return post<CreateRoomResponse>("/api/room", req);
+	},
+	listRooms() {
+		return get<ListRoomsResponse>("/api/room");
 	},
 };

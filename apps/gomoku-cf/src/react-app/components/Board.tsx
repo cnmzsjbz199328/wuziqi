@@ -17,18 +17,42 @@ const STAR_POINTS = [
 	[11, 11],
 ];
 
+export interface StoneStyle {
+	fill: string;
+	stroke?: string;
+}
+
+// Default 2-color palette used by the single-player page. Multi-player
+// derives its palette from the server-supplied player→color map.
+export const SINGLE_PLAYER_PALETTE: Record<string, StoneStyle> = {
+	black: { fill: "#111", stroke: "#000" },
+	white: { fill: "#fafaf6", stroke: "#9a9a8e" },
+};
+
+const FALLBACK_STYLE: StoneStyle = { fill: "#888", stroke: "#444" };
+
 interface Props {
 	board: BoardType;
 	lastMove: { row: number; col: number } | null;
 	disabled: boolean;
 	onPlace: (row: number, col: number) => void;
+	palette?: Record<string, StoneStyle>;
 }
 
 function xy(idx: number): number {
 	return PAD + idx * CELL;
 }
 
-export function Board({ board, lastMove, disabled, onPlace }: Props) {
+export function Board({
+	board,
+	lastMove,
+	disabled,
+	onPlace,
+	palette = SINGLE_PLAYER_PALETTE,
+}: Props) {
+	const styleFor = (marker: string): StoneStyle =>
+		palette[marker] ?? FALLBACK_STYLE;
+
 	return (
 		<svg
 			viewBox={`0 0 ${SIZE} ${SIZE}`}
@@ -50,19 +74,21 @@ export function Board({ board, lastMove, disabled, onPlace }: Props) {
 			))}
 
 			{board.flatMap((row, r) =>
-				row.map((cell, c) =>
-					cell ? (
+				row.map((cell, c) => {
+					if (!cell) return null;
+					const s = styleFor(cell);
+					return (
 						<circle
 							key={`stone-${r}-${c}`}
 							cx={xy(c)}
 							cy={xy(r)}
 							r={STONE_R}
-							fill={cell === "black" ? "#111" : "#fafaf6"}
-							stroke={cell === "black" ? "#000" : "#9a9a8e"}
-							strokeWidth={cell === "black" ? 0 : 0.8}
+							fill={s.fill}
+							stroke={s.stroke ?? "none"}
+							strokeWidth={s.stroke ? 0.8 : 0}
 						/>
-					) : null
-				)
+					);
+				})
 			)}
 
 			{lastMove && board[lastMove.row][lastMove.col] && (
@@ -70,7 +96,7 @@ export function Board({ board, lastMove, disabled, onPlace }: Props) {
 					cx={xy(lastMove.col)}
 					cy={xy(lastMove.row)}
 					r={4}
-					fill={board[lastMove.row][lastMove.col] === "black" ? "#dcb35c" : "#c0392b"}
+					fill="#c0392b"
 				/>
 			)}
 

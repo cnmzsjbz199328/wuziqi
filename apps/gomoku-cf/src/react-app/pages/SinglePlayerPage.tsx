@@ -9,9 +9,10 @@ interface Props {
 	identity: Identity;
 	score: number;
 	onScored: (newScore: number) => void;
+	onBack: () => void;
 }
 
-export function SinglePlayerPage({ identity, score, onScored }: Props) {
+export function SinglePlayerPage({ identity, score, onScored, onBack }: Props) {
 	const submitScore = useCallback(
 		async (delta: number) => {
 			try {
@@ -37,9 +38,15 @@ export function SinglePlayerPage({ identity, score, onScored }: Props) {
 
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between gap-3">
+			<div className="flex items-center justify-between gap-2 flex-wrap">
+				<button
+					type="button"
+					onClick={onBack}
+					className="text-stone-400 hover:text-stone-200 text-sm py-1.5"
+				>
+					← 返回
+				</button>
 				<div className="flex items-baseline gap-2">
-					<span className="text-stone-400 text-sm">回合</span>
 					<span
 						className={`text-base font-medium ${
 							isPlayerTurn ? "text-emerald-400" : "text-stone-300"
@@ -50,12 +57,14 @@ export function SinglePlayerPage({ identity, score, onScored }: Props) {
 				</div>
 				<div className="flex items-baseline gap-2">
 					<span className="text-stone-400 text-sm">积分</span>
-					<span className="text-base font-medium text-amber-300 tabular-nums">{score}</span>
+					<span className="text-base font-medium text-amber-300 tabular-nums">
+						{score}
+					</span>
 				</div>
 				<button
 					type="button"
 					onClick={reset}
-					className="bg-stone-700 hover:bg-stone-600 text-stone-100 text-sm px-3 py-1.5 rounded transition-colors"
+					className="bg-stone-700 hover:bg-stone-600 text-stone-100 text-sm px-3 py-2 rounded transition-colors"
 				>
 					重开
 				</button>

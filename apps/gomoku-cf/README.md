@@ -1,8 +1,8 @@
 # gomoku-cf
 
-Gomoku on Cloudflare Workers. React + Vite SPA, Hono Worker, SQLite-backed
-Durable Objects for real-time rooms, KV for user records and the
-leaderboard. All within the Workers free plan.
+Non-standard Gomoku on Cloudflare Workers. React + Vite SPA, Hono Worker,
+SQLite-backed Durable Objects for real-time rooms, KV for user records.
+All within the Workers free plan.
 
 ```
 Browser (React SPA)
@@ -10,10 +10,28 @@ Browser (React SPA)
        ▼
 Cloudflare Worker (Hono)
        │
-       ├── /api/user/* ──► KV
-       ├── /api/room/*/ws ► Durable Object (one per room, WS Hibernation)
+       ├── /api/user/*  ──► KV (claim / rename / score)
+       ├── /api/room    ──► KV (public lobby index) + Durable Object
+       ├── /api/room/:code/ws ► Durable Object WS upgrade (Hibernation)
        └── /*           ──► static assets (the SPA bundle)
 ```
+
+## What it is
+
+Two play modes:
+
+- **Single-player vs local AI** — pure client-side game state, scores
+  posted to KV via `POST /api/user/score`.
+- **Multiplayer rooms** — up to 4 humans + 1 always-present bot per room.
+  Public rooms appear in the lobby; private rooms are joined by 6-char
+  code. The bot keeps a 1-human room playable and gives 2+ human rooms
+  a third actor that breaks up 1v1 standoffs.
+
+5-in-a-row is **not the win condition** — it's a scoring event: clear
+the winner's connected stones, randomly disrupt the same count from
+every other player on board, score `max(0, clearedSelf - 4)`. First to
+**5 in-room points** ends the round; the server picks a random Tang
+quatrain to reveal as the win flourish.
 
 ## Local development
 
@@ -107,7 +125,8 @@ curl -fs -X POST -H 'Content-Type: application/json' \
 ```
 
 Then open `$URL` in a browser — you should land on the welcome modal
-with the two-button "🎲 Random / ✏️ Custom" choice.
+with the two-button "🎲 Random / ✏️ Custom" choice, then on the home
+screen with **单机 vs AI** / **进入大厅(多人)** entry points.
 
 ## Subsequent deploys
 
@@ -177,16 +196,38 @@ npx wrangler tail   # from apps/gomoku-cf, requires `wrangler login` first
 
 Or Dashboard → Workers & Pages → `gomoku-cf` → **Logs**.
 
-## What's NOT yet wired in production
+## Smoke test the multiplayer flow
 
-These are explicitly missing as of M2 — they ship in later milestones:
+After deploy, on the live URL:
 
-- **M3**: single-player vs AI, the board UI, score submission to the
-  leaderboard.
-- **M4**: real-time multiplayer (Durable Object game rooms with
-  WebSocket Hibernation). The DO class exists as a stub that only echoes
-  messages back.
-- **M5**: leaderboard endpoint, poem seed data, mobile polish.
+```bash
+# Claim a short test username (≤16 chars, [a-zA-Z0-9_])
+curl -s -X POST https://<your>.workers.dev/api/user/claim \
+  -H "Content-Type: application/json" \
+  -d '{"username":"smoke1"}'
+# Capture the `token` from the response.
 
-The deploy still works at M2 — it just shows the welcome modal and
-ping/bindings smoke endpoints behind it.
+# Create a public room
+curl -s -X POST https://<your>.workers.dev/api/room \
+  -H "Content-Type: application/json" \
+  -d '{"username":"smoke1","token":"<TOKEN>","visibility":"public"}'
+# → { "roomCode": "ABC123", "visibility": "public" }
+
+# Confirm it shows up in the lobby (KV has ~60s consistency window;
+# `players: ["Bot"]` is the expected initial state since the creator
+# hasn't WS-connected yet).
+curl -s https://<your>.workers.dev/api/room
+```
+
+Then open the live URL in two browser windows under different usernames,
+join the same code, and verify the player strip + turn rotation +
+poem-on-win flow.
+
+## Post-launch ideas (not in scope yet)
+
+- `/api/leaderboard` aggregating KV `user:*` totals
+- In-room chat (would extend `protocol.ts` with a `ClientChat` /
+  `ServerChat` message pair)
+- Sound effects (place / clear / win)
+- "Spectator" seat that joins without taking a color
+- Configurable round-win threshold per room

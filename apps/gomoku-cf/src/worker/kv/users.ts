@@ -141,6 +141,26 @@ export async function updateScore(
 }
 
 /**
+ * Server-side score increment used by the GameRoom DO when a player
+ * triggers a clear event. No token required — the DO has already
+ * established the connection is authentic. Silently no-ops if the
+ * user record vanished (e.g., bot or stale username).
+ */
+export async function addScoreInternal(
+	kv: KVNamespace,
+	username: string,
+	delta: number
+): Promise<void> {
+	const current = await getUser(kv, username);
+	if (!current) return;
+	const next: UserRecord = {
+		...current,
+		score: Math.max(0, current.score + delta),
+	};
+	await kv.put(keyFor(username), JSON.stringify(next));
+}
+
+/**
  * Cheap leaderboard: list all keys with the user: prefix, fetch each as
  * JSON, sort by score desc. KV list is paginated; we collect up to
  * `pageLimit` users (default 1000). For >1000 users we'd want a different

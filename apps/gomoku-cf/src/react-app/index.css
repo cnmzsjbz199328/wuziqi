@@ -15,3 +15,21 @@ body {
 	margin: 0;
 	min-height: 100vh;
 }
+
+/* Blinking caret for the round-end typewriter reveal. Inspired by the
+   legacy frontend's .typewriter rule (orange caret on a tan poem strip),
+   but split out so the type-in is JS-driven (deterministic across
+   variable-width CJK glyphs) while only the cursor stays CSS-animated. */
+@keyframes caret-blink {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0; }
+}
+.poem-caret {
+	display: inline-block;
+	width: 0.08em;
+	height: 1em;
+	margin-left: 0.1em;
+	background-color: currentColor;
+	vertical-align: text-bottom;
+	animation: caret-blink 0.85s step-end infinite;
+}
