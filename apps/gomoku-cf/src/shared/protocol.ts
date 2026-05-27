@@ -17,12 +17,14 @@ export type Board = z.infer<typeof BoardSchema>;
 export const GameStatusSchema = z.enum(["waiting", "playing", "finished"]);
 export type GameStatus = z.infer<typeof GameStatusSchema>;
 
-// 3-16 chars, letters/digits/underscore/CJK. Mirrors server-side validation.
+// 3-16 chars, ASCII letters/digits/underscore only. CJK was considered but
+// dropped — round-tripping non-ASCII through URL paths, KV keys, and shell
+// scripts adds bugs without enough product value to justify it.
 export const UsernameSchema = z
 	.string()
 	.min(3)
 	.max(16)
-	.regex(/^[a-zA-Z0-9_一-龥]+$/, "用户名只能含字母、数字、下划线、中文");
+	.regex(/^[a-zA-Z0-9_]+$/, "用户名只能含字母、数字、下划线");
 
 // 64-char hex token issued at claim time.
 export const TokenSchema = z.string().length(128).regex(/^[a-f0-9]+$/);
@@ -34,6 +36,10 @@ export const RoomCodeSchema = z.string().length(6).regex(/^[A-HJ-NP-Z2-9]+$/);
 
 export const ClaimRequestSchema = z.object({
 	username: UsernameSchema,
+	// Optional. When present and matching the stored token, claim is
+	// idempotent (returns the same token). When absent or mismatched on
+	// an existing username, the server replies 409.
+	token: TokenSchema.optional(),
 });
 export type ClaimRequest = z.infer<typeof ClaimRequestSchema>;
 

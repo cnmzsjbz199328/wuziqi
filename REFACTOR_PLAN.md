@@ -248,7 +248,7 @@ AI 仅在"对人机"模式中由 DO 在玩家落子后立即调用 —— 不需
 - **WebSocket 鉴权**：DO 接收到首条 `join` 消息时校验 token，不通过则 `ws.close(4001, 'unauthorized')`。
 - **token 丢失**：用户清缓存就丢身份 —— 这是 trade-off，换来的是免密码注册的丝滑体验。用户重新认领即可（若名字被占就换名）。
 - **输入校验**：每个 REST handler 用 Zod 校验 body，每条 WS 消息也用 Zod parse；DO 内对 `row`/`col` 做范围 + 占位检查。
-- **用户名规则**：3-16 字符，`[a-zA-Z0-9_一-龥]`（允许中文），不含空格和特殊符号。
+- **用户名规则**：3-16 字符，ASCII 字母 / 数字 / 下划线。CJK 曾考虑过但放弃 —— 非 ASCII 在 URL 路径、KV key、shell 脚本之间往返容易踩坑，收益不足以抵消。
 - **房间号**：6 位 base32（去掉易混淆字符 0/O/1/I/L），命名空间足够（~10⁹），无需碰撞检测。
 - **不做主动防滥用**：上线初期不加速率限制 / 验证码。真出现批量占名再用 Cloudflare 的 [Rate Limiting Rules](https://developers.cloudflare.com/waf/rate-limiting-rules/) 在 zone 级别加一条规则即可，无需改代码。
 

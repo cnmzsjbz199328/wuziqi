@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import userRoutes from "./routes/user";
 
 export { GameRoom } from "./do/GameRoom";
 
@@ -8,7 +9,6 @@ app.get("/api/ping", (c) =>
 	c.json({ ok: true, now: new Date().toISOString() })
 );
 
-// Quick sanity check that bindings are wired even though they're not yet used.
 app.get("/api/_bindings", (c) =>
 	c.json({
 		kv: typeof c.env.KV?.get === "function",
@@ -16,5 +16,7 @@ app.get("/api/_bindings", (c) =>
 		assets: typeof c.env.ASSETS?.fetch === "function",
 	})
 );
+
+app.route("/api/user", userRoutes);
 
 export default app;
