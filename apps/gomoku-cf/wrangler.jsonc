@@ -19,13 +19,12 @@
 		"run_worker_first": ["/api/*"]
 	},
 
-	// KV namespace.
-	//   Local dev: the `id` below is a placeholder; Miniflare uses an in-memory
-	//   KV store and ignores it.
-	//   Deploy: run `npx wrangler kv namespace create gomoku-cf-kv` and replace
-	//   the id with the real one returned (32-char hex).
+	// KV namespace `gomoku-cf-kv`.
+	//   Local dev: Miniflare uses an in-memory KV store and ignores the id.
+	//   Production: namespace was created via dashboard (Storage & Databases →
+	//   KV) and the id below points at it.
 	"kv_namespaces": [
-		{ "binding": "KV", "id": "0000000000000000000000000000aaaa" }
+		{ "binding": "KV", "id": "3b95a7c3ae1741e2b4eb6e7bf21cccb2" }
 	],
 
 	// Durable Object: one per game room. SQLite-backed = free plan.
