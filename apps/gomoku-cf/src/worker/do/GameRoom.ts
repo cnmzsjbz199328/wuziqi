@@ -347,9 +347,24 @@ export class GameRoom extends DurableObject<Env> {
 			await this.ctx.storage.deleteAlarm();
 			return;
 		}
+		// Don't let the bot play to an empty room — if no humans are
+		// connected, the bot would just keep ticking against itself.
+		// Pause and wait for a human to reconnect.
+		if (!this.hasAnyConnectedHuman()) {
+			await this.ctx.storage.deleteAlarm();
+			return;
+		}
 		// Small delay so clients render the previous move before the bot
 		// move lands. The alarm handler does the actual play.
 		await this.ctx.storage.setAlarm(Date.now() + BOT_THINK_MS);
+	}
+
+	private hasAnyConnectedHuman(): boolean {
+		const connected = this.connectedUsernames();
+		for (const u of connected) {
+			if (u !== BOT_USERNAME) return true;
+		}
+		return false;
 	}
 
 	async alarm(): Promise<void> {
@@ -358,6 +373,7 @@ export class GameRoom extends DurableObject<Env> {
 		if (status !== "playing") return;
 		const turn = (await this.storage().get<string>("turn")) ?? null;
 		if (turn !== BOT_USERNAME) return;
+		if (!this.hasAnyConnectedHuman()) return;
 
 		const board =
 			(await this.storage().get<Board>("board")) ?? createBoard();
