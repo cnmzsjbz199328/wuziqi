@@ -2,6 +2,8 @@ import type {
 	ClaimRequest,
 	ClaimResponse,
 	RenameRequest,
+	ScoreRequest,
+	UserStats,
 } from "../../shared/protocol";
 
 export class ApiError extends Error {
@@ -36,5 +38,8 @@ export const api = {
 	},
 	rename(req: RenameRequest) {
 		return post<ClaimResponse>("/api/user/rename", req);
+	},
+	score(req: ScoreRequest) {
+		return post<UserStats>("/api/user/score", req);
 	},
 };

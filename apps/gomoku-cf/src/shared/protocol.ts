@@ -46,6 +46,8 @@ export type ClaimRequest = z.infer<typeof ClaimRequestSchema>;
 export const ClaimResponseSchema = z.object({
 	username: UsernameSchema,
 	token: TokenSchema,
+	score: z.number().int().nonnegative(),
+	gamesPlayed: z.number().int().nonnegative(),
 });
 export type ClaimResponse = z.infer<typeof ClaimResponseSchema>;
 
@@ -55,6 +57,23 @@ export const RenameRequestSchema = z.object({
 	newName: UsernameSchema,
 });
 export type RenameRequest = z.infer<typeof RenameRequestSchema>;
+
+export const ScoreRequestSchema = z.object({
+	username: UsernameSchema,
+	token: TokenSchema,
+	// Capped to keep a malicious client from flooding huge numbers.
+	// A typical 5-run clear scores 1; a crossed double-line ~5; 20 is
+	// well beyond any realistic single event.
+	delta: z.number().int().min(1).max(20),
+});
+export type ScoreRequest = z.infer<typeof ScoreRequestSchema>;
+
+export const UserStatsSchema = z.object({
+	username: UsernameSchema,
+	score: z.number().int().nonnegative(),
+	gamesPlayed: z.number().int().nonnegative(),
+});
+export type UserStats = z.infer<typeof UserStatsSchema>;
 
 export const CreateRoomRequestSchema = z.object({
 	username: UsernameSchema,

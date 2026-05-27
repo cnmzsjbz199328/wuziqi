@@ -115,7 +115,13 @@ export type UpdateScoreResult =
 	| { ok: true; record: UserRecord }
 	| { ok: false; reason: "unauthorized" };
 
-/** Atomic from the caller's POV; non-atomic at KV level (read-modify-write). */
+/**
+ * Adds `delta` to the player's score. Atomic from the caller's POV;
+ * non-atomic at KV level (read-modify-write). `gamesPlayed` is NOT
+ * bumped here — under the non-standard rules a single match can produce
+ * many scoring events, so end-of-match tracking belongs in a separate
+ * call that ships with multiplayer (M4).
+ */
 export async function updateScore(
 	kv: KVNamespace,
 	username: string,
@@ -129,7 +135,6 @@ export async function updateScore(
 	const next: UserRecord = {
 		...current,
 		score: Math.max(0, current.score + delta),
-		gamesPlayed: current.gamesPlayed + 1,
 	};
 	await kv.put(keyFor(username), JSON.stringify(next));
 	return { ok: true, record: next };

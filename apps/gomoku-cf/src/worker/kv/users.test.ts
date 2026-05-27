@@ -138,14 +138,15 @@ describe("rename", () => {
 });
 
 describe("updateScore", () => {
-	it("adds delta and increments gamesPlayed", async () => {
+	it("adds delta without touching gamesPlayed", async () => {
 		const a = await claim(kv, "alice");
 		if (!a.ok) throw new Error("setup failed");
-		const r = await updateScore(kv, "alice", a.record.token, 3);
-		expect(r.ok).toBe(true);
-		if (r.ok) {
-			expect(r.record.score).toBe(3);
-			expect(r.record.gamesPlayed).toBe(1);
+		const r1 = await updateScore(kv, "alice", a.record.token, 3);
+		const r2 = await updateScore(kv, "alice", a.record.token, 2);
+		expect(r1.ok && r2.ok).toBe(true);
+		if (r2.ok) {
+			expect(r2.record.score).toBe(5);
+			expect(r2.record.gamesPlayed).toBe(0);
 		}
 	});
 

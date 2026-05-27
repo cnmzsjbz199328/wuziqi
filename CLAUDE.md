@@ -94,5 +94,6 @@ npm run cf-typegen   # regenerate worker-configuration.d.ts after wrangler.jsonc
 - **M0** — scaffold (Vite-React-Cloudflare template + Tailwind + Zod + DO/KV bindings + smoke endpoints)
 - **M1** — pure game engine + AI in `src/worker/game/`, 33 tests, 99% line coverage
 - **M2** — username claim + KV adapter + welcome modal + identity hook, 16 more tests
+- **M3** — single-player vs AI: responsive SVG board, `useSinglePlayerGame` hook, `POST /api/user/score`, `ScoreToast` for 5-in-a-row clear events. 10 more tests (59 total). `updateScore` no longer bumps `gamesPlayed` (scoring is per-clear-event under the non-standard rules, not per-game; end-of-match accounting moves to M4).
 
-Next is **M3** — single-player vs AI on the board UI.
+Next is **M4** — real-time multiplayer in the Durable Object (Hibernation API + WS protocol).

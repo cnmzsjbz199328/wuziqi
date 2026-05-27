@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { ApiError, api } from "../lib/api";
 import { randomName } from "../lib/randomName";
 
@@ -7,18 +7,25 @@ const STORAGE_KEY = "gomoku.identity";
 export interface Identity {
 	username: string;
 	token: string;
+	score: number;
 }
 
 function loadIdentity(): Identity | null {
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (!raw) return null;
-		const parsed = JSON.parse(raw) as Identity;
+		const parsed = JSON.parse(raw) as Partial<Identity>;
 		if (
 			typeof parsed.username === "string" &&
 			typeof parsed.token === "string"
 		) {
-			return parsed;
+			return {
+				username: parsed.username,
+				token: parsed.token,
+				// Pre-M3 identities stored before the score field existed: treat
+				// as 0 locally; next score POST returns the authoritative number.
+				score: typeof parsed.score === "number" ? parsed.score : 0,
+			};
 		}
 		return null;
 	} catch {
@@ -31,17 +38,17 @@ function saveIdentity(id: Identity) {
 }
 
 export type IdentityState =
-	| { status: "loading" }
 	| { status: "anonymous" }
 	| { status: "ready"; identity: Identity };
 
-export function useIdentity() {
-	const [state, setState] = useState<IdentityState>({ status: "loading" });
+function initialState(): IdentityState {
+	// Pure CSR app — reading localStorage during render is safe.
+	const stored = loadIdentity();
+	return stored ? { status: "ready", identity: stored } : { status: "anonymous" };
+}
 
-	useEffect(() => {
-		const stored = loadIdentity();
-		setState(stored ? { status: "ready", identity: stored } : { status: "anonymous" });
-	}, []);
+export function useIdentity() {
+	const [state, setState] = useState<IdentityState>(initialState);
 
 	const claimRandom = useCallback(async (): Promise<Identity> => {
 		// Up to 3 retries on the (very unlikely) collision.
@@ -50,7 +57,11 @@ export function useIdentity() {
 			const name = randomName();
 			try {
 				const response = await api.claim({ username: name });
-				const identity: Identity = response;
+				const identity: Identity = {
+					username: response.username,
+					token: response.token,
+					score: response.score,
+				};
 				saveIdentity(identity);
 				setState({ status: "ready", identity });
 				return identity;
@@ -65,7 +76,11 @@ export function useIdentity() {
 	const claimCustom = useCallback(
 		async (name: string): Promise<Identity> => {
 			const response = await api.claim({ username: name });
-			const identity: Identity = response;
+			const identity: Identity = {
+				username: response.username,
+				token: response.token,
+				score: response.score,
+			};
 			saveIdentity(identity);
 			setState({ status: "ready", identity });
 			return identity;
@@ -83,7 +98,11 @@ export function useIdentity() {
 				token: state.identity.token,
 				newName,
 			});
-			const identity: Identity = response;
+			const identity: Identity = {
+				username: response.username,
+				token: response.token,
+				score: response.score,
+			};
 			saveIdentity(identity);
 			setState({ status: "ready", identity });
 			return identity;
@@ -91,10 +110,19 @@ export function useIdentity() {
 		[state]
 	);
 
+	const setScore = useCallback((newScore: number) => {
+		setState((s) => {
+			if (s.status !== "ready") return s;
+			const identity = { ...s.identity, score: newScore };
+			saveIdentity(identity);
+			return { status: "ready", identity };
+		});
+	}, []);
+
 	const signOut = useCallback(() => {
 		localStorage.removeItem(STORAGE_KEY);
 		setState({ status: "anonymous" });
 	}, []);
 
-	return { state, claimRandom, claimCustom, renameTo, signOut };
+	return { state, claimRandom, claimCustom, renameTo, setScore, signOut };
 }
