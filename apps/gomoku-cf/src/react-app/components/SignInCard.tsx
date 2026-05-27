@@ -33,8 +33,8 @@ export function SignInCard({ onRandom, onCustom }: Props) {
 	const handleCustom = async (e: React.FormEvent) => {
 		e.preventDefault();
 		const trimmed = name.trim();
-		if (trimmed.length < 3 || trimmed.length > 16) {
-			setError("3-16 字符");
+		if (trimmed.length < 1 || trimmed.length > 16) {
+			setError("1-16 字符");
 			return;
 		}
 		if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) {
@@ -56,7 +56,7 @@ export function SignInCard({ onRandom, onCustom }: Props) {
 			<div>
 				<h3 className="text-emerald-300 font-medium">取个名字开始</h3>
 				<p className="text-stone-400 text-xs mt-0.5">
-					3-16 字符,字母/数字/下划线
+					最多 16 字符,字母/数字/下划线
 				</p>
 			</div>
 

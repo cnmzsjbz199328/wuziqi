@@ -21,8 +21,8 @@ export function UserBadge({ identity, onRename, onSignOut }: Props) {
 			setEditing(false);
 			return;
 		}
-		if (next.length < 3 || next.length > 16) {
-			setError("3-16 字符");
+		if (next.length < 1 || next.length > 16) {
+			setError("1-16 字符");
 			return;
 		}
 		if (!/^[a-zA-Z0-9_]+$/.test(next)) {

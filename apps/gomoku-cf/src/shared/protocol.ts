@@ -24,12 +24,12 @@ export type Board = z.infer<typeof BoardSchema>;
 export const GameStatusSchema = z.enum(["waiting", "playing", "finished"]);
 export type GameStatus = z.infer<typeof GameStatusSchema>;
 
-// 3-16 chars, ASCII letters/digits/underscore only. CJK was considered but
+// 1-16 chars, ASCII letters/digits/underscore only. CJK was considered but
 // dropped — round-tripping non-ASCII through URL paths, KV keys, and shell
 // scripts adds bugs without enough product value to justify it.
 export const UsernameSchema = z
 	.string()
-	.min(3)
+	.min(1)
 	.max(16)
 	.regex(/^[a-zA-Z0-9_]+$/, "用户名只能含字母、数字、下划线");
 

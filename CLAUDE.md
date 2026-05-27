@@ -111,7 +111,7 @@ npm run cf-typegen   # regenerate worker-configuration.d.ts after wrangler.jsonc
 ### Critical conventions
 
 - **`src/shared/protocol.ts` is the only source of truth for cross-boundary types.** Both worker and react-app import from it. Adding a new WS message or REST endpoint? Add a Zod schema here first.
-- **`UsernameSchema`: 3-16 chars, `[a-zA-Z0-9_]` only.** CJK was considered and dropped — non-ASCII round-tripping through URLs, KV keys, and shell scripts caused bugs without enough product value. `"Bot"` is reserved (`ensureSeat` rejects it for humans).
+- **`UsernameSchema`: 1-16 chars, `[a-zA-Z0-9_]` only.** CJK was considered and dropped — non-ASCII round-tripping through URLs, KV keys, and shell scripts caused bugs without enough product value. `"Bot"` is reserved (`ensureSeat` rejects it for humans).
 - **`Cell = string | null`.** A non-empty marker (username or a legacy `"black"/"white"` tag in single-player). Game functions (`placeStone`, `hasFiveInARow`, `clearWinningLines`, `smartMove`) accept any string identifier — that's what lets the same engine drive 2-color single-player AND N-player rooms.
 - **Durable Object: SQLite-backed, Hibernation API.** `GameRoom.fetch` accepts WS upgrades via `ctx.acceptWebSocket(server)` — never call `ws.accept()` (that disables hibernation and burns GB-s). Sockets carry `{ username }` via `serializeAttachment` so identity survives wake-up.
 - **DO auth is in the DO** (not the Worker). The browser WebSocket API can't send headers, so the WS upgrade URL carries `?username=X&token=Y` which the DO validates against KV before accepting. URL is over TLS but visible in access logs — acceptable for a casual game.
