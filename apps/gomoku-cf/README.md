@@ -1,90 +1,192 @@
-# React + Vite + Hono + Cloudflare Workers
+# gomoku-cf
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cloudflare/templates/tree/main/vite-react-template)
+Gomoku on Cloudflare Workers. React + Vite SPA, Hono Worker, SQLite-backed
+Durable Objects for real-time rooms, KV for user records and the
+leaderboard. All within the Workers free plan.
 
-This template provides a minimal setup for building a React application with TypeScript and Vite, designed to run on Cloudflare Workers. It features hot module replacement, ESLint integration, and the flexibility of Workers deployments.
-
-![React + TypeScript + Vite + Cloudflare Workers](https://imagedelivery.net/wSMYJvS3Xw-n339CbDyDIA/fc7b4b62-442b-4769-641b-ad4422d74300/public)
-
-<!-- dash-content-start -->
-
-🚀 Supercharge your web development with this powerful stack:
-
-- [**React**](https://react.dev/) - A modern UI library for building interactive interfaces
-- [**Vite**](https://vite.dev/) - Lightning-fast build tooling and development server
-- [**Hono**](https://hono.dev/) - Ultralight, modern backend framework
-- [**Cloudflare Workers**](https://developers.cloudflare.com/workers/) - Edge computing platform for global deployment
-
-### ✨ Key Features
-
-- 🔥 Hot Module Replacement (HMR) for rapid development
-- 📦 TypeScript support out of the box
-- 🛠️ ESLint configuration included
-- ⚡ Zero-config deployment to Cloudflare's global network
-- 🎯 API routes with Hono's elegant routing
-- 🔄 Full-stack development setup
-- 🔎 Built-in Observability to monitor your Worker
-
-Get started in minutes with local development or deploy directly via the Cloudflare dashboard. Perfect for building modern, performant web applications at the edge.
-
-<!-- dash-content-end -->
-
-## Getting Started
-
-To start a new project with this template, run:
-
-```bash
-npm create cloudflare@latest -- --template=cloudflare/templates/vite-react-template
+```
+Browser (React SPA)
+       │
+       ▼
+Cloudflare Worker (Hono)
+       │
+       ├── /api/user/* ──► KV
+       ├── /api/room/*/ws ► Durable Object (one per room, WS Hibernation)
+       └── /*           ──► static assets (the SPA bundle)
 ```
 
-A live deployment of this template is available at:
-[https://react-vite-template.templates.workers.dev](https://react-vite-template.templates.workers.dev)
-
-## Development
-
-Install dependencies:
+## Local development
 
 ```bash
-npm install
+cd apps/gomoku-cf
+npm install         # first time only
+npm run dev         # http://localhost:5173, full-stack HMR
+npm test            # vitest run-once
+npm run check       # tsc -b && vite build && wrangler deploy --dry-run
 ```
 
-Start the development server with:
+The dev server uses Miniflare under the hood, so KV and Durable Objects
+work in-memory. The placeholder KV id in `wrangler.jsonc` is ignored
+locally; you do **not** need a Cloudflare account to develop.
+
+## Production deployment (one-time setup)
+
+Deployment runs on Cloudflare's Workers Builds — push to the connected
+branch and Cloudflare builds + deploys automatically. No `wrangler deploy`
+from your laptop, no API tokens in CI secrets, no `.env` files.
+
+### 1. Cloudflare account
+
+Sign in at <https://dash.cloudflare.com>. The free plan is enough for
+this project (we've verified we stay inside its limits — see
+`REFACTOR_PLAN.md` §2 for the math).
+
+### 2. Create the KV namespace (dashboard, 30 seconds)
+
+The Worker reads and writes user records to KV. The namespace must exist
+*before* the first deploy, otherwise runtime calls will fail.
+
+1. Dashboard → **Storage & Databases** → **KV**
+2. **Create a namespace** → name it `gomoku-cf-kv` → **Add**
+3. Copy the **Namespace ID** (32 hex chars).
+
+### 3. Wire the real KV id into `wrangler.jsonc`
+
+In `apps/gomoku-cf/wrangler.jsonc` replace the placeholder:
+
+```jsonc
+"kv_namespaces": [
+  { "binding": "KV", "id": "0000000000000000000000000000aaaa" }   // ← placeholder
+]
+```
+
+with the real id you just copied. Commit and push — the change has to
+land on the branch Cloudflare is going to build, or the deploy will use
+the placeholder and runtime KV calls will 404.
+
+> **Why is the id in source?** KV namespace ids aren't secret. They're
+> account-scoped public identifiers, like an S3 bucket name. They go in
+> the config alongside the binding name.
+
+### 4. Connect the GitHub repo to Workers Builds
+
+1. Dashboard → **Workers & Pages** → **Create** → **Import a repository**.
+2. Authorize Cloudflare's GitHub App on the `cnmzsjbz199328/wuziqi` repo
+   when prompted. Scope it to just this repo if your account has many.
+3. Pick the repo, then configure the build:
+
+   | Field | Value |
+   |---|---|
+   | **Project name** | `gomoku-cf` (becomes part of the URL) |
+   | **Production branch** | `rewrite/serverless` (switch to `main` after the merge) |
+   | **Root directory** | `apps/gomoku-cf` |
+   | **Build command** | `npm run build` |
+   | **Deploy command** | `npx wrangler deploy` |
+   | **Build variables** | _(none)_ |
+   | **Build system version** | v2 (default) |
+
+4. **Save and Deploy.** First build takes ~2 minutes (npm install + tsc
+   + vite + wrangler). You'll get a `gomoku-cf.<your-subdomain>.workers.dev`
+   URL when it finishes.
+
+### 5. Smoke-test the live URL
 
 ```bash
-npm run dev
+URL=https://gomoku-cf.<your-subdomain>.workers.dev
+
+curl -fs $URL/api/ping
+# → {"ok":true,"now":"..."}
+
+curl -fs $URL/api/_bindings
+# → {"kv":true,"gameRoom":true,"assets":true}
+
+curl -fs -X POST -H 'Content-Type: application/json' \
+  -d '{"username":"smoketest"}' \
+  $URL/api/user/claim
+# → {"username":"smoketest","token":"<128 hex chars>"}
 ```
 
-Your application will be available at [http://localhost:5173](http://localhost:5173).
+Then open `$URL` in a browser — you should land on the welcome modal
+with the two-button "🎲 Random / ✏️ Custom" choice.
 
-## Production
+## Subsequent deploys
 
-Build your project for production:
+Just push to the production branch:
 
 ```bash
-npm run build
+git push origin rewrite/serverless
 ```
 
-Preview your build locally:
+Cloudflare detects the push, runs the build, and rolls the new version
+out. Builds and deploys show up at Dashboard → Workers & Pages →
+`gomoku-cf` → **Deployments**.
+
+PRs against the production branch get **preview deployments** at
+`<commit-hash>.gomoku-cf.<your-subdomain>.workers.dev`, isolated from
+the production KV (Cloudflare provisions a preview namespace
+automatically).
+
+## Troubleshooting
+
+### Build fails on `wrangler deploy`
+
+If `npm run check` works locally but the CF build fails, common causes:
+
+- **KV id is still the placeholder.** Replace it in `wrangler.jsonc` and
+  push.
+- **`worker-configuration.d.ts` is stale** because someone added a new
+  binding to `wrangler.jsonc` without running `npm run cf-typegen`.
+  Re-generate it locally and commit.
+- **`compatibility_date`** (`2025-11-25` as pinned) is older than what
+  the build's workerd supports — that's only a warning, not an error.
+  Safe to ignore; bump only if you actually need a newer feature.
+
+### `/api/_bindings` shows `"kv": false`
+
+You're hitting the deployed Worker but the KV binding isn't wired. Most
+likely the placeholder id was never replaced, or the change to
+`wrangler.jsonc` is on a different branch than the one Cloudflare is
+building from.
+
+### Durable Object errors on first deploy
+
+The first deploy must include the `migrations` block that ships with
+`wrangler.jsonc`:
+
+```jsonc
+"migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["GameRoom"] }
+]
+```
+
+If you ever rename the DO class, **add a new migration** with a new
+`tag` and a `renamed_classes` entry — don't edit the v1 entry. The
+existing `tag: "v1"` line is permanent.
+
+### Rolling back
+
+Dashboard → Workers & Pages → `gomoku-cf` → **Deployments** → pick a
+previous successful deployment → **Rollback**. Takes effect within a
+few seconds globally.
+
+### Watching live logs
 
 ```bash
-npm run preview
+npx wrangler tail   # from apps/gomoku-cf, requires `wrangler login` first
 ```
 
-Deploy your project to Cloudflare Workers:
+Or Dashboard → Workers & Pages → `gomoku-cf` → **Logs**.
 
-```bash
-npm run build && npm run deploy
-```
+## What's NOT yet wired in production
 
-Monitor your workers:
+These are explicitly missing as of M2 — they ship in later milestones:
 
-```bash
-npx wrangler tail
-```
+- **M3**: single-player vs AI, the board UI, score submission to the
+  leaderboard.
+- **M4**: real-time multiplayer (Durable Object game rooms with
+  WebSocket Hibernation). The DO class exists as a stub that only echoes
+  messages back.
+- **M5**: leaderboard endpoint, poem seed data, mobile polish.
 
-## Additional Resources
-
-- [Cloudflare Workers Documentation](https://developers.cloudflare.com/workers/)
-- [Vite Documentation](https://vitejs.dev/guide/)
-- [React Documentation](https://reactjs.org/)
-- [Hono Documentation](https://hono.dev/)
+The deploy still works at M2 — it just shows the welcome modal and
+ping/bindings smoke endpoints behind it.
