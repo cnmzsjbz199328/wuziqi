@@ -50,11 +50,16 @@ import { pickRandomPoem } from "../poems";
 const HUMAN_COLORS: PlayerColor[] = ["black", "white", "red", "blue"];
 const BOT_COLOR: PlayerColor = "amber";
 
-const BOT_THINK_MS = 600;
-// A connected human has 60s to move; otherwise their turn auto-skips.
-// Long enough for an inattentive player to come back from a tab switch,
-// short enough that the next player isn't blocked indefinitely.
-const TURN_TIMEOUT_MS = 60_000;
+// Bot's "thinking" delay before its alarm-driven move lands. Long
+// enough that the previous move + any clear-and-disrupt animation has
+// time to register visually before stones start moving again.
+const BOT_THINK_MS = 1500;
+
+// Connected-human turn budget. Only enforced when 2+ humans are in
+// the room (see rescheduleAlarm) — solo-human-vs-bot rooms have no
+// per-turn deadline since there's nobody else waiting.
+const TURN_TIMEOUT_MS = 3 * 60_000;
+
 // A room with no connected humans is destroyed after 5 minutes idle.
 // A reconnect during the window cancels the GC and resumes play.
 const ROOM_GC_MS = 5 * 60_000;
@@ -390,8 +395,11 @@ export class GameRoom extends DurableObject<Env> {
 	/**
 	 * Decide what (if anything) the single alarm slot should be doing
 	 * next, given the current turn, status, and connection set:
-	 *   - Bot's turn → bot_move @ +600ms (smartMove plays via alarm handler)
-	 *   - Connected human's turn → turn_timeout @ +60s (auto-skip if idle)
+	 *   - Bot's turn → bot_move @ +1500ms (smartMove plays via alarm handler)
+	 *   - Connected human's turn AND ≥2 humans in room → turn_timeout @
+	 *     +3min (auto-skip if idle). Solo-human rooms skip the deadline
+	 *     entirely — the only other actor is the bot, which doesn't mind
+	 *     waiting, so there's nobody to be "fair" to.
 	 *   - No connected humans → room_gc @ +5min (destroy if still empty)
 	 *   - Anything else (status != playing, etc.) → no alarm
 	 * Called after every state mutation that could shift this decision.
@@ -399,9 +407,9 @@ export class GameRoom extends DurableObject<Env> {
 	private async rescheduleAlarm(): Promise<void> {
 		const status =
 			(await this.storage().get<GameStatus>("status")) ?? "waiting";
-		const hasHumans = this.hasAnyConnectedHuman();
+		const connectedHumanCount = this.countConnectedHumans();
 
-		if (!hasHumans) {
+		if (connectedHumanCount === 0) {
 			await this.storage().put("alarm_reason", "room_gc" satisfies AlarmReason);
 			await this.ctx.storage.setAlarm(Date.now() + ROOM_GC_MS);
 			return;
@@ -419,7 +427,7 @@ export class GameRoom extends DurableObject<Env> {
 			await this.ctx.storage.setAlarm(Date.now() + BOT_THINK_MS);
 			return;
 		}
-		if (turn) {
+		if (turn && connectedHumanCount >= 2) {
 			await this.storage().put(
 				"alarm_reason",
 				"turn_timeout" satisfies AlarmReason
@@ -427,16 +435,22 @@ export class GameRoom extends DurableObject<Env> {
 			await this.ctx.storage.setAlarm(Date.now() + TURN_TIMEOUT_MS);
 			return;
 		}
+		// Solo-human-on-their-turn: no deadline. Clear any stale alarm.
 		await this.storage().delete("alarm_reason");
 		await this.ctx.storage.deleteAlarm();
 	}
 
 	private hasAnyConnectedHuman(): boolean {
+		return this.countConnectedHumans() > 0;
+	}
+
+	private countConnectedHumans(): number {
 		const connected = this.connectedUsernames();
+		let n = 0;
 		for (const u of connected) {
-			if (u !== BOT_USERNAME) return true;
+			if (u !== BOT_USERNAME) n++;
 		}
-		return false;
+		return n;
 	}
 
 	async alarm(): Promise<void> {

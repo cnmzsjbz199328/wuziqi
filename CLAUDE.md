@@ -46,7 +46,7 @@ Every `GameRoom` Durable Object seats one AI player (`username = "Bot"`, color `
 - **Visibility**: public rooms appear in `GET /api/room` (KV index at `room_idx:public:<code>`). Private rooms have no index entry — joinable only by 6-char code.
 - **Seats**: max 4 humans + 1 bot. Human colors `black / white / red / blue` assigned in join order; bot fixed `amber`.
 - **5-in-a-row in N-player**: clear winner's lines; then for **each** other player (including bot), randomly remove `clearedSelf` of their stones.
-- **Single alarm slot, three uses**: `bot_move` (+600ms when bot's turn), `turn_timeout` (+60s on a connected human's turn → auto-skip), `room_gc` (+5min when no humans connected → `destroy()`). Stored in `alarm_reason`; reconciled by `rescheduleAlarm()` after every state mutation.
+- **Single alarm slot, three uses**: `bot_move` (+1500ms when bot's turn — long enough for the previous move + any clear/disrupt animation to register), `turn_timeout` (+3min on a connected human's turn, **only when ≥2 humans are in the room** — solo-human-vs-bot rooms skip the deadline since there's nobody else waiting), `room_gc` (+5min when no humans connected → `destroy()`). Stored in `alarm_reason`; reconciled by `rescheduleAlarm()` after every state mutation.
 - **Score persistence**: per-room scores live in the DO; on every clear with `pointsAwarded > 0` for a human, the DO fires `addScoreInternal` against KV via `ctx.waitUntil`. KV is the durable home for cross-room totals.
 
 ## `apps/gomoku-cf/` — the active project
