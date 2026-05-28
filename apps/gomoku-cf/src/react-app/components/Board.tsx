@@ -113,7 +113,7 @@ export function Board({
 				const ids = new Set(removed.map((s) => s.id));
 				window.setTimeout(() => {
 					setExiting((cur) => cur.filter((s) => !ids.has(s.id)));
-				}, 1000);
+				}, 2200);
 			}
 		}
 		// styleFor / clearedBy intentionally read fresh each board change.
@@ -124,6 +124,7 @@ export function Board({
 		<svg
 			viewBox={`0 0 ${SIZE} ${SIZE}`}
 			className="block w-full h-auto rounded-lg select-none touch-manipulation"
+			style={{ overflow: "visible" }}
 			role="grid"
 			aria-label="五子棋棋盘"
 		>

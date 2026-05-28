@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	RoomCodeSchema,
 	type RoomVisibility,
@@ -27,6 +27,22 @@ export function RoomWidget({
 }: Props) {
 	const [codeInput, setCodeInput] = useState("");
 	const [codeError, setCodeError] = useState<string | null>(null);
+	const [confirmRestart, setConfirmRestart] = useState(false);
+	const confirmTimerRef = useRef<number | null>(null);
+
+	const requestRestart = () => {
+		setConfirmRestart(true);
+		if (confirmTimerRef.current !== null) window.clearTimeout(confirmTimerRef.current);
+		confirmTimerRef.current = window.setTimeout(() => setConfirmRestart(false), 4000);
+	};
+	const confirmAndRestart = () => {
+		if (confirmTimerRef.current !== null) window.clearTimeout(confirmTimerRef.current);
+		setConfirmRestart(false);
+		onRestart();
+	};
+	useEffect(() => () => {
+		if (confirmTimerRef.current !== null) window.clearTimeout(confirmTimerRef.current);
+	}, []);
 
 	const submitJoin = (e: React.FormEvent) => {
 		e.preventDefault();
@@ -110,14 +126,34 @@ export function RoomWidget({
 				<p className="text-red-400 text-xs">{codeError}</p>
 			)}
 
-			<button
-				type="button"
-				onClick={onRestart}
-				className="w-full text-stone-500 hover:text-stone-300 text-xs py-1 transition-colors"
-				title="清空棋盘并把所有人的本房分数归零"
-			>
-				重开本房间棋局
-			</button>
+			{confirmRestart ? (
+				<div className="flex items-center gap-2">
+					<span className="text-amber-400 text-xs flex-1">确定要重开？</span>
+					<button
+						type="button"
+						onClick={confirmAndRestart}
+						className="text-xs px-2 py-1 rounded bg-amber-700 hover:bg-amber-600 text-amber-50 transition-colors"
+					>
+						确定
+					</button>
+					<button
+						type="button"
+						onClick={() => setConfirmRestart(false)}
+						className="text-xs px-2 py-1 rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
+					>
+						取消
+					</button>
+				</div>
+			) : (
+				<button
+					type="button"
+					onClick={requestRestart}
+					className="w-full text-stone-500 hover:text-stone-300 text-xs py-1 transition-colors"
+					title="清空棋盘并把所有人的本房分数归零"
+				>
+					重开本房间棋局
+				</button>
+			)}
 		</section>
 	);
 }
