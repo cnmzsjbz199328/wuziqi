@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BOARD_SIZE, type Board, type Stone } from "../../shared/protocol";
+import { BOARD_SIZE, type Board } from "../../shared/protocol";
 import {
 	clearWinningLines,
 	createBoard,
@@ -10,7 +10,7 @@ import {
 	scoreForClear,
 } from "./board";
 
-function withStones(stones: Array<[number, number, Stone]>): Board {
+function withStones(stones: Array<[number, number, string]>): Board {
 	const b = createBoard();
 	for (const [r, c, s] of stones) b[r][c] = s;
 	return b;
@@ -22,9 +22,9 @@ function lineOfStones(
 	dr: number,
 	dc: number,
 	count: number,
-	stone: Stone
-): Array<[number, number, Stone]> {
-	const result: Array<[number, number, Stone]> = [];
+	stone: string
+): Array<[number, number, string]> {
+	const result: Array<[number, number, string]> = [];
 	for (let i = 0; i < count; i++) result.push([r + i * dr, c + i * dc, stone]);
 	return result;
 }

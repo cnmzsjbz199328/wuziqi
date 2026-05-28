@@ -1,12 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-	claim,
-	generateToken,
-	getUser,
-	listAllUsers,
-	rename,
-	updateScore,
-} from "./users";
+import { claim, generateToken, getUser, rename } from "./users";
 
 /**
  * Minimal in-memory fake of the KVNamespace surface this adapter touches.
@@ -97,8 +90,11 @@ describe("rename", () => {
 	it("changes username while keeping token and score", async () => {
 		const first = await claim(kv, "alice");
 		if (!first.ok) throw new Error("setup failed");
-		// give her a score so we can confirm it's preserved
-		await updateScore(kv, "alice", first.record.token, 5);
+		// seed a score directly so we can confirm rename preserves it
+		await kv.put(
+			"user:alice",
+			JSON.stringify({ ...first.record, score: 5 })
+		);
 
 		const r = await rename(kv, "alice", first.record.token, "alicia");
 		expect(r.ok).toBe(true);
@@ -134,57 +130,5 @@ describe("rename", () => {
 		if (!a.ok) throw new Error("setup failed");
 		const r = await rename(kv, "alice", a.record.token, "alice");
 		expect(r.ok).toBe(true);
-	});
-});
-
-describe("updateScore", () => {
-	it("adds delta without touching gamesPlayed", async () => {
-		const a = await claim(kv, "alice");
-		if (!a.ok) throw new Error("setup failed");
-		const r1 = await updateScore(kv, "alice", a.record.token, 3);
-		const r2 = await updateScore(kv, "alice", a.record.token, 2);
-		expect(r1.ok && r2.ok).toBe(true);
-		if (r2.ok) {
-			expect(r2.record.score).toBe(5);
-			expect(r2.record.gamesPlayed).toBe(0);
-		}
-	});
-
-	it("clamps negative result to 0", async () => {
-		const a = await claim(kv, "alice");
-		if (!a.ok) throw new Error("setup failed");
-		const r = await updateScore(kv, "alice", a.record.token, -100);
-		expect(r.ok).toBe(true);
-		if (r.ok) expect(r.record.score).toBe(0);
-	});
-
-	it("rejects with wrong token", async () => {
-		await claim(kv, "alice");
-		const r = await updateScore(kv, "alice", "0".repeat(128), 1);
-		expect(r.ok).toBe(false);
-	});
-
-	it("rejects for unknown user", async () => {
-		const r = await updateScore(kv, "ghost", "0".repeat(128), 1);
-		expect(r.ok).toBe(false);
-	});
-});
-
-describe("listAllUsers", () => {
-	it("returns all users sorted by KV list order (caller sorts later)", async () => {
-		await claim(kv, "alice");
-		await claim(kv, "bob");
-		await claim(kv, "carol");
-		const all = await listAllUsers(kv);
-		expect(all.map((u) => u.username).sort()).toEqual(["alice", "bob", "carol"]);
-	});
-
-	it("never returns the password / token to leak through", async () => {
-		// Sanity: our record DOES include token (the route layer is responsible
-		// for stripping it). This test pins that behavior so we know to strip
-		// tokens in any handler that exposes listAllUsers output.
-		await claim(kv, "alice");
-		const all = await listAllUsers(kv);
-		expect(all[0].token).toMatch(/^[a-f0-9]{128}$/);
 	});
 });

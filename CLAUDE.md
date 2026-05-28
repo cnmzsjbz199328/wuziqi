@@ -35,7 +35,7 @@ A 5-in-a-row is **not the end of the game**; it's a scoring + disrupt event:
 - All of the winning player's stones that belong to any 5-in-a-row (overlapping/extended runs are de-duplicated) are removed from the board.
 - Then, for each opposing color present on the board, `clearedSelf` of their stones are removed at random.
 - Score awarded = `max(0, clearedSelf - 4)`. A single 5-run scores 1; a 6-run (one stone of overlap with the next position) scores 2; a fork that unions 9 unique stones scores 5.
-- A round ends when one player accumulates **5 in-room points** (`ROUND_WIN_POINTS` in `GameRoom.ts`). The DO broadcasts `ServerEnd { finalScores, poem }` and any seated player can send `ClientRestart` to start a fresh round.
+- **There is no auto-end.** Play continues indefinitely; per-room scores accumulate in the DO. Every scoring clear (`pointsAwarded > 0`) carries a random Tang quatrain in its `ServerClear` message, which the client typewrites in the page header (room-scoped — only that room sees it). The only way scores reset is a manual `ClientRestart` from any seated player, which also clears the board.
 
 Keep this rule intact unless the user explicitly asks otherwise — it was previously flagged as a bug, but the user has confirmed it's the product's core differentiator.
 
@@ -47,7 +47,7 @@ Every `GameRoom` Durable Object seats one AI player (`username = "Bot"`, color `
 - **Seats**: max 4 humans + 1 bot. Human colors `black / white / red / blue` assigned in join order; bot fixed `amber`.
 - **5-in-a-row in N-player**: clear winner's lines; then for **each** other player (including bot), randomly remove `clearedSelf` of their stones.
 - **Single alarm slot, three uses**: `bot_move` (+1500ms when bot's turn — long enough for the previous move + any clear/disrupt animation to register), `turn_timeout` (+3min on a connected human's turn, **only when ≥2 humans are in the room** — solo-human-vs-bot rooms skip the deadline since there's nobody else waiting), `room_gc` (+5min when no humans connected → `destroy()`). Stored in `alarm_reason`; reconciled by `rescheduleAlarm()` after every state mutation.
-- **Score persistence**: per-room scores live in the DO; on every clear with `pointsAwarded > 0` for a human, the DO fires `addScoreInternal` against KV via `ctx.waitUntil`. KV is the durable home for cross-room totals.
+- **Score persistence**: per-room scores live entirely in the DO (`bumpPlayerScore` writes to DO storage) and are scoped to the room's current round. They are NOT mirrored to KV — KV holds only the identity record (username + token); the once-planned cross-room cumulative total was dropped in favour of per-room scoring.
 
 ## `apps/gomoku-cf/` — the active project
 
@@ -59,22 +59,22 @@ apps/gomoku-cf/
 │   ├── react-app/                       # Vite-bundled React frontend, single-page
 │   │   ├── main.tsx, App.tsx, index.css # entry + Tailwind + typewriter @keyframes
 │   │   ├── pages/GamePage.tsx           # the only page: board (left) + sidebar (right)
-│   │   ├── components/                  # Board, EndScreen, LobbyWidget, PlayerList,
-│   │   │                                  RoomWidget, UserBadge, WelcomeModal
+│   │   ├── components/                  # Board, PoemHeader, LobbyWidget, PlayerList,
+│   │   │                                  RoomWidget, UserBadge, SignInCard
 │   │   ├── hooks/                       # useIdentity, useMultiPlayerGame
-│   │   │                                  (WS + reconnect + EndEvent)
+│   │   │                                  (WS + reconnect + ClearEvent/poem)
 │   │   └── lib/                         # api.ts (REST client), randomName
 │   ├── worker/                          # Cloudflare Worker
 │   │   ├── index.ts                     # Hono entry, exports GameRoom DO, mounts routes
-│   │   ├── routes/                      # user.ts (claim/rename/score), room.ts
+│   │   ├── routes/                      # user.ts (claim/rename), room.ts
 │   │   │                                  (create/list/meta/ws-upgrade)
 │   │   ├── do/GameRoom.ts               # the per-room DO: seats, turn rotation, single
-│   │   │                                  alarm slot, restartRound, endRound
+│   │   │                                  alarm slot, restartRound
 │   │   ├── game/                        # board.ts, ai.ts — pure, marker-agnostic
 │   │   │                                  (any string is a valid Cell value)
-│   │   ├── kv/                          # users.ts (+ addScoreInternal), rooms.ts
+│   │   ├── kv/                          # users.ts (claim/rename), rooms.ts
 │   │   │                                  (public lobby index), types.ts
-│   │   └── poems.ts                     # inline Tang quatrains for round-end flourish
+│   │   └── poems.ts                     # inline Tang quatrains for the scoring flourish
 │   └── shared/protocol.ts               # Zod schemas + types for ALL cross-boundary
 │                                          traffic (REST + WS)
 ├── wrangler.jsonc                       # bindings: KV (real id), GAME_ROOM DO, ASSETS
@@ -132,7 +132,7 @@ npm run cf-typegen   # regenerate worker-configuration.d.ts after wrangler.jsonc
 - **M2** — username claim + KV adapter + welcome modal + identity hook, 16 more tests
 - **M3** — single-player vs AI: responsive SVG board, `useSinglePlayerGame` hook, `POST /api/user/score`, `ScoreToast` for 5-in-a-row clear events. 59 tests total.
 - **M4** — multiplayer rooms with always-present bot. `Cell` decoupled from stone color; `GameRoom` DO + WS Hibernation; public/private room visibility + KV lobby index; `/api/room` create/list/meta/ws routes; multi-color `Board` + `PlayerStrip` chips; `useMultiPlayerGame` WS hook. 64 tests.
-- **M5** — round end + polish. 60s per-turn timeout + 5-min-idle room GC sharing one alarm slot via `rescheduleAlarm`; first-to-5-points round end with random Tang poem via `EndScreen` overlay (JS-driven typewriter for CJK); 10s lobby auto-refresh; mobile-friendly top bars + touch targets. 68 tests.
+- **M5** — round end + polish. 3-min per-turn timeout (only when ≥2 humans) + 5-min-idle room GC sharing one alarm slot via `rescheduleAlarm`; random Tang poem on each scoring clear, typewritten in the page header via `PoemHeader` (JS-driven for CJK); 10s lobby auto-refresh; mobile-friendly top bars + touch targets. Later reworked: dropped the first-to-5 auto-end / `EndScreen` in favour of open-ended per-room scoring.
 - **M6.x** — single-page rewrite of the frontend. Dropped the 4-view router (`HomePage` / `SinglePlayerPage` / `LobbyPage` / `MultiPlayerPage`) and the standalone single-player engine (`useSinglePlayerGame`, `lib/singlePlayer*`, `ScoreToast`, horizontal `PlayerStrip`) in favour of one `GamePage` with a board + right sidebar (`RoomWidget` for current-room controls, vertical `PlayerList`, `LobbyWidget` for public rooms). After identity claim, `App.tsx` auto-creates a private room so the user lands on a playable board with no intermediate menu. 58 tests (down from 68 — singlePlayer.test removed).
 
 Production runs on Cloudflare Workers Builds — push to `rewrite/serverless` auto-deploys; PRs against it get isolated preview deployments. See `apps/gomoku-cf/README.md` for the operational guide.

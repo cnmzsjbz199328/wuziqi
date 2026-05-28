@@ -7,21 +7,18 @@ export const WIN_COUNT = 5;
 export const MAX_HUMANS_PER_ROOM = 4;
 export const BOT_USERNAME = "Bot";
 
-// Legacy stone tag used by the local single-player page; multi-player
-// uses player usernames as cell markers instead. Both are valid
-// CellSchema values (any non-empty string identifier).
-export const StoneSchema = z.enum(["black", "white"]);
-export type Stone = z.infer<typeof StoneSchema>;
-
-// A cell holds a player identifier (a username, or one of the legacy
-// "black"/"white" tags for single-player local state) or null when empty.
+// A cell holds a player identifier (a username) or null when empty. The
+// engine is marker-agnostic — any non-empty string is a valid stone — so
+// the same functions drive both the bot and human players.
 export const CellSchema = z.string().min(1).nullable();
 export type Cell = z.infer<typeof CellSchema>;
 
 export const BoardSchema = z.array(z.array(CellSchema));
 export type Board = z.infer<typeof BoardSchema>;
 
-export const GameStatusSchema = z.enum(["waiting", "playing", "finished"]);
+// Rooms only ever sit in "waiting" (no humans yet) or "playing". There is
+// no auto-end state — a 5-in-a-row is a scoring event, not a game over.
+export const GameStatusSchema = z.enum(["waiting", "playing"]);
 export type GameStatus = z.infer<typeof GameStatusSchema>;
 
 // 1-16 chars, ASCII letters/digits/underscore only. CJK was considered but
@@ -80,23 +77,6 @@ export const RenameRequestSchema = z.object({
 });
 export type RenameRequest = z.infer<typeof RenameRequestSchema>;
 
-export const ScoreRequestSchema = z.object({
-	username: UsernameSchema,
-	token: TokenSchema,
-	// Capped to keep a malicious client from flooding huge numbers.
-	// A typical 5-run clear scores 1; a crossed double-line ~5; 20 is
-	// well beyond any realistic single event.
-	delta: z.number().int().min(1).max(20),
-});
-export type ScoreRequest = z.infer<typeof ScoreRequestSchema>;
-
-export const UserStatsSchema = z.object({
-	username: UsernameSchema,
-	score: z.number().int().nonnegative(),
-	gamesPlayed: z.number().int().nonnegative(),
-});
-export type UserStats = z.infer<typeof UserStatsSchema>;
-
 export const CreateRoomRequestSchema = z.object({
 	username: UsernameSchema,
 	token: TokenSchema,
@@ -124,13 +104,6 @@ export const ListRoomsResponseSchema = z.object({
 	rooms: z.array(RoomSummarySchema),
 });
 export type ListRoomsResponse = z.infer<typeof ListRoomsResponseSchema>;
-
-export const LeaderboardEntrySchema = z.object({
-	username: UsernameSchema,
-	score: z.number().int().nonnegative(),
-	gamesPlayed: z.number().int().nonnegative(),
-});
-export type LeaderboardEntry = z.infer<typeof LeaderboardEntrySchema>;
 
 export const PoemSchema = z.object({
 	text: z.string(),

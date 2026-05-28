@@ -5,8 +5,6 @@ import type {
 	CreateRoomResponse,
 	ListRoomsResponse,
 	RenameRequest,
-	ScoreRequest,
-	UserStats,
 } from "../../shared/protocol";
 
 export class ApiError extends Error {
@@ -52,9 +50,6 @@ export const api = {
 	},
 	rename(req: RenameRequest) {
 		return post<ClaimResponse>("/api/user/rename", req);
-	},
-	score(req: ScoreRequest) {
-		return post<UserStats>("/api/user/score", req);
 	},
 	createRoom(req: CreateRoomRequest) {
 		return post<CreateRoomResponse>("/api/room", req);

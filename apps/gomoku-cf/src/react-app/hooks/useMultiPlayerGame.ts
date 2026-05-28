@@ -195,24 +195,11 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		}
 	}, [state?.status, state?.board]);
 
-	const leave = useCallback(() => {
-		cancelledRef.current = true;
-		if (reconnectTimerRef.current !== null) {
-			window.clearTimeout(reconnectTimerRef.current);
-			reconnectTimerRef.current = null;
-		}
-		wsRef.current?.close();
-		wsRef.current = null;
-	}, []);
-
-	const me =
-		username ? (state?.players.find((p) => p.username === username) ?? null) : null;
 	const isMyTurn = !!username && state?.turn === username;
 
 	return {
 		connection,
 		state,
-		me,
 		isMyTurn,
 		isSpectator,
 		lastClear,
@@ -220,6 +207,5 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		errorMsg,
 		place,
 		restart,
-		leave,
 	};
 }

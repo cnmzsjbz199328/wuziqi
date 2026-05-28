@@ -226,7 +226,7 @@ function LandingShell({
 					/>
 				</div>
 				<p className="text-stone-500 text-xs text-center px-2">
-					五连成线 → 清除己方连子,每位对手随机被扰乱相同数量。先达 5 分者胜。
+					五连成线 → 清除己方连子,每位对手随机被扰乱相同数量,得分时古诗在标题处显现。
 				</p>
 			</div>
 

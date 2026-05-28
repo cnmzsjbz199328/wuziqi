@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { BOARD_SIZE, type Board, type Stone } from "../../shared/protocol";
+import { BOARD_SIZE, type Board } from "../../shared/protocol";
 import { randomMove, smartMove } from "./ai";
 import { createBoard } from "./board";
 
-function withStones(stones: Array<[number, number, Stone]>): Board {
+function withStones(stones: Array<[number, number, string]>): Board {
 	const b = createBoard();
 	for (const [r, c, s] of stones) b[r][c] = s;
 	return b;
@@ -19,7 +19,7 @@ describe("randomMove", () => {
 	});
 
 	it("returns null on a full board", () => {
-		const b = createBoard().map((row) => row.map((): Stone => "black"));
+		const b = createBoard().map((row) => row.map((): string => "black"));
 		expect(randomMove(b)).toBe(null);
 	});
 

@@ -110,19 +110,10 @@ export function useIdentity() {
 		[state]
 	);
 
-	const setScore = useCallback((newScore: number) => {
-		setState((s) => {
-			if (s.status !== "ready") return s;
-			const identity = { ...s.identity, score: newScore };
-			saveIdentity(identity);
-			return { status: "ready", identity };
-		});
-	}, []);
-
 	const signOut = useCallback(() => {
 		localStorage.removeItem(STORAGE_KEY);
 		setState({ status: "anonymous" });
 	}, []);
 
-	return { state, claimRandom, claimCustom, renameTo, setScore, signOut };
+	return { state, claimRandom, claimCustom, renameTo, signOut };
 }
