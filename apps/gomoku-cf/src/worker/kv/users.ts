@@ -79,34 +79,3 @@ export async function claim(
 	return { ok: true, record };
 }
 
-export type RenameResult =
-	| { ok: true; record: UserRecord }
-	| { ok: false; reason: "unauthorized" | "new_name_taken" };
-
-/**
- * Rename keeps the same token, score, and gamesPlayed. Old key is deleted
- * after the new key is written, so a reader during the brief window
- * between the put and the delete may see both — we accept this as a
- * trade for the simplicity of not needing a transaction.
- */
-export async function rename(
-	kv: KVNamespace,
-	username: string,
-	token: string,
-	newName: string
-): Promise<RenameResult> {
-	const current = await getUser(kv, username);
-	if (!current || !constantTimeEq(current.token, token)) {
-		return { ok: false, reason: "unauthorized" };
-	}
-	if (newName === username) {
-		return { ok: true, record: current };
-	}
-	const collision = await getUser(kv, newName);
-	if (collision) return { ok: false, reason: "new_name_taken" };
-
-	const renamed: UserRecord = { ...current, username: newName };
-	await kv.put(keyFor(newName), JSON.stringify(renamed));
-	await kv.delete(keyFor(username));
-	return { ok: true, record: renamed };
-}

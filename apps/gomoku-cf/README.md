@@ -10,7 +10,7 @@ Browser (React SPA)
        ▼
 Cloudflare Worker (Hono)
        │
-       ├── /api/user/*  ──► KV (claim / rename / score)
+       ├── /api/user/*  ──► KV (claim)
        ├── /api/room    ──► KV (public lobby index) + Durable Object
        ├── /api/room/:code/ws ► Durable Object WS upgrade (Hibernation)
        └── /*           ──► static assets (the SPA bundle)

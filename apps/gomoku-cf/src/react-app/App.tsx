@@ -46,7 +46,7 @@ const EMPTY_BOARD: BoardType = Array.from({ length: BOARD_SIZE }, () =>
 );
 
 function App() {
-	const { state, claimRandom, claimCustom, renameTo, signOut } = useIdentity();
+	const { state, claimRandom, claimCustom, signOut } = useIdentity();
 
 	const [roomCode, setRoomCode] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -146,7 +146,6 @@ function App() {
 				{state.status === "ready" && (
 					<UserBadge
 						identity={state.identity}
-						onRename={renameTo}
 						onSignOut={handleSignOut}
 					/>
 				)}

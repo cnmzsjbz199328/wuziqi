@@ -66,13 +66,13 @@ apps/gomoku-cf/
 │   │   └── lib/                         # api.ts (REST client), randomName
 │   ├── worker/                          # Cloudflare Worker
 │   │   ├── index.ts                     # Hono entry, exports GameRoom DO, mounts routes
-│   │   ├── routes/                      # user.ts (claim/rename), room.ts
+│   │   ├── routes/                      # user.ts (claim), room.ts
 │   │   │                                  (create/list/meta/ws-upgrade)
 │   │   ├── do/GameRoom.ts               # the per-room DO: seats, turn rotation, single
 │   │   │                                  alarm slot, restartRound
 │   │   ├── game/                        # board.ts, ai.ts — pure, marker-agnostic
 │   │   │                                  (any string is a valid Cell value)
-│   │   ├── kv/                          # users.ts (claim/rename), rooms.ts
+│   │   ├── kv/                          # users.ts (claim), rooms.ts
 │   │   │                                  (public lobby index), types.ts
 │   │   └── poems.ts                     # inline Tang quatrains for the scoring flourish
 │   └── shared/protocol.ts               # Zod schemas + types for ALL cross-boundary

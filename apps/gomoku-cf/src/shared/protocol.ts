@@ -70,13 +70,6 @@ export const ClaimResponseSchema = z.object({
 });
 export type ClaimResponse = z.infer<typeof ClaimResponseSchema>;
 
-export const RenameRequestSchema = z.object({
-	username: UsernameSchema,
-	token: TokenSchema,
-	newName: UsernameSchema,
-});
-export type RenameRequest = z.infer<typeof RenameRequestSchema>;
-
 export const CreateRoomRequestSchema = z.object({
 	username: UsernameSchema,
 	token: TokenSchema,

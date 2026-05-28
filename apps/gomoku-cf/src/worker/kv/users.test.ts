@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { claim, generateToken, getUser, rename } from "./users";
+import { claim, generateToken } from "./users";
 
 /**
  * Minimal in-memory fake of the KVNamespace surface this adapter touches.
@@ -83,52 +83,5 @@ describe("claim", () => {
 		await claim(kv, "alice");
 		const result = await claim(kv, "alice", "f".repeat(128));
 		expect(result.ok).toBe(false);
-	});
-});
-
-describe("rename", () => {
-	it("changes username while keeping token and score", async () => {
-		const first = await claim(kv, "alice");
-		if (!first.ok) throw new Error("setup failed");
-		// seed a score directly so we can confirm rename preserves it
-		await kv.put(
-			"user:alice",
-			JSON.stringify({ ...first.record, score: 5 })
-		);
-
-		const r = await rename(kv, "alice", first.record.token, "alicia");
-		expect(r.ok).toBe(true);
-		if (r.ok) {
-			expect(r.record.username).toBe("alicia");
-			expect(r.record.token).toBe(first.record.token);
-			expect(r.record.score).toBe(5);
-		}
-		expect(await getUser(kv, "alice")).toBeNull();
-		expect((await getUser(kv, "alicia"))?.username).toBe("alicia");
-	});
-
-	it("rejects with wrong token", async () => {
-		await claim(kv, "alice");
-		const r = await rename(kv, "alice", "0".repeat(128), "alicia");
-		expect(r.ok).toBe(false);
-		if (!r.ok) expect(r.reason).toBe("unauthorized");
-	});
-
-	it("rejects when new name is already taken", async () => {
-		const a = await claim(kv, "alice");
-		await claim(kv, "bob");
-		if (!a.ok) throw new Error("setup failed");
-		const r = await rename(kv, "alice", a.record.token, "bob");
-		expect(r.ok).toBe(false);
-		if (!r.ok) expect(r.reason).toBe("new_name_taken");
-		// alice still owns her old name
-		expect((await getUser(kv, "alice"))?.username).toBe("alice");
-	});
-
-	it("no-ops when renaming to the same name", async () => {
-		const a = await claim(kv, "alice");
-		if (!a.ok) throw new Error("setup failed");
-		const r = await rename(kv, "alice", a.record.token, "alice");
-		expect(r.ok).toBe(true);
 	});
 });

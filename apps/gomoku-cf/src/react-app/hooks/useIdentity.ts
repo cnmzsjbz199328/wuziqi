@@ -88,32 +88,10 @@ export function useIdentity() {
 		[]
 	);
 
-	const renameTo = useCallback(
-		async (newName: string): Promise<Identity> => {
-			if (state.status !== "ready") {
-				throw new Error("Cannot rename before identity is established");
-			}
-			const response = await api.rename({
-				username: state.identity.username,
-				token: state.identity.token,
-				newName,
-			});
-			const identity: Identity = {
-				username: response.username,
-				token: response.token,
-				score: response.score,
-			};
-			saveIdentity(identity);
-			setState({ status: "ready", identity });
-			return identity;
-		},
-		[state]
-	);
-
 	const signOut = useCallback(() => {
 		localStorage.removeItem(STORAGE_KEY);
 		setState({ status: "anonymous" });
 	}, []);
 
-	return { state, claimRandom, claimCustom, renameTo, signOut };
+	return { state, claimRandom, claimCustom, signOut };
 }
