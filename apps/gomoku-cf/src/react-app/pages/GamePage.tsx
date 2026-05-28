@@ -111,6 +111,7 @@ export function GamePage({
 							}
 							onPlace={handlePlace}
 							palette={paletteForPlayers(state.players)}
+							clearedBy={lastClear?.by}
 						/>
 					) : (
 						<BoardSkeleton />

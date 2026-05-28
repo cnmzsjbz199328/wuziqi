@@ -16,6 +16,16 @@ const COLOR_BORDER: Record<PlayerColor, string> = {
 	amber: "#78350f",
 };
 
+// Label colour for the first-initial drawn on each stone — light text on
+// dark stones, dark text on the pale ones.
+const COLOR_TEXT: Record<PlayerColor, string> = {
+	black: "#f5f5f5",
+	white: "#222222",
+	red: "#fff5f5",
+	blue: "#eff6ff",
+	amber: "#3a2718",
+};
+
 interface Props {
 	players: RoomPlayer[];
 	turn: string | null;
@@ -78,12 +88,14 @@ export function PlayerList({ players, turn, me }: Props) {
 
 export function paletteForPlayers(
 	players: RoomPlayer[]
-): Record<string, { fill: string; stroke: string }> {
-	const map: Record<string, { fill: string; stroke: string }> = {};
+): Record<string, { fill: string; stroke: string; text: string }> {
+	const map: Record<string, { fill: string; stroke: string; text: string }> =
+		{};
 	for (const p of players) {
 		map[p.username] = {
 			fill: COLOR_FILL[p.color],
 			stroke: COLOR_BORDER[p.color],
+			text: COLOR_TEXT[p.color],
 		};
 	}
 	return map;
