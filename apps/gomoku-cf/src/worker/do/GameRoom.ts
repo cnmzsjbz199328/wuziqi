@@ -21,6 +21,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
 	BOT_USERNAME,
+	ClientMessageSchema,
 	MAX_HUMANS_PER_ROOM,
 	type Board,
 	type GameStatus,
@@ -597,74 +598,55 @@ export class GameRoom extends DurableObject<Env> {
 		raw: string | ArrayBuffer
 	): Promise<void> {
 		const att = ws.deserializeAttachment() as WsAttachment | null;
-		// Note: spectator sockets have att.username === null and are
-		// allowed to stay open — they just can't send action messages.
-		// Only a missing attachment (corrupt socket) gets closed.
+		// Spectator sockets carry att.username === null and stay open —
+		// they just can't send action messages. Only a missing attachment
+		// (corrupt socket) gets closed.
 		if (!att) {
 			ws.close(1008, "no_attachment");
 			return;
 		}
 		const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
-		let msg: unknown;
+		let json: unknown;
 		try {
-			msg = JSON.parse(text);
+			json = JSON.parse(text);
 		} catch {
 			this.sendErrorToWs(ws, "bad_json", "Could not parse message");
 			return;
 		}
-		if (
-			typeof msg !== "object" ||
-			msg === null ||
-			!("type" in msg) ||
-			typeof (msg as { type: unknown }).type !== "string"
-		) {
+		// Validate against the shared client-message contract — the single
+		// source of truth for inbound shape and bounds (place row/col range,
+		// join credentials, etc). Anything off-contract is rejected here.
+		const parsed = ClientMessageSchema.safeParse(json);
+		if (!parsed.success) {
 			this.sendErrorToWs(ws, "bad_message", "Malformed message");
 			return;
 		}
-		const m = msg as { type: string; row?: number; col?: number };
+		const m = parsed.data;
 
-		// Spectator gating: actions require a seated identity. We tell
-		// the client which code to react on so the UI can prompt the
-		// guest to sign in instead of silently dropping the move.
-		if (m.type === "place" || m.type === "restart" || m.type === "resign") {
-			if (!att.username) {
-				this.sendErrorToWs(
-					ws,
-					"spectator_only",
-					"请先登记昵称才能下子"
-				);
-				return;
-			}
+		// Spectator gating: every action except `join` requires a seated
+		// identity. We surface the code so the client can prompt the guest
+		// to sign in instead of silently dropping the move.
+		if (m.type !== "join" && !att.username) {
+			this.sendErrorToWs(ws, "spectator_only", "请先登记昵称才能下子");
+			return;
 		}
 
-		if (m.type === "place") {
-			if (
-				typeof m.row !== "number" ||
-				typeof m.col !== "number" ||
-				!Number.isInteger(m.row) ||
-				!Number.isInteger(m.col)
-			) {
-				this.sendErrorToWs(ws, "bad_place", "row/col required");
+		switch (m.type) {
+			case "place":
+				await this.handlePlace(att.username!, m.row, m.col);
 				return;
-			}
-			await this.handlePlace(att.username!, m.row, m.col);
-			return;
+			case "join":
+				// Identity is established at upgrade time; a late join is
+				// just a request for a fresh state snapshot.
+				await this.broadcastState();
+				return;
+			case "restart":
+				await this.restartRound();
+				return;
+			case "resign":
+				ws.close(1000, "resigned");
+				return;
 		}
-		if (m.type === "join") {
-			// Identity is already established at upgrade time; treat a
-			// late join as a request for a fresh state snapshot.
-			await this.broadcastState();
-			return;
-		}
-		if (m.type === "restart") {
-			await this.restartRound();
-			return;
-		}
-		if (m.type === "resign") {
-			ws.close(1000, "resigned");
-			return;
-		}
-		this.sendErrorToWs(ws, "unknown_type", `Unknown type: ${m.type}`);
 	}
 
 	private sendErrorToWs(ws: WebSocket, code: string, message: string): void {
