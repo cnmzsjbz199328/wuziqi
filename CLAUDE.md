@@ -21,7 +21,7 @@ wuziqi/
 | `Board.java` | Source of truth for the non-standard "clear winning line + randomly remove opponent stones" rule. The TS port in `apps/gomoku-cf/src/worker/game/board.ts` was derived from this. |
 | `Game.java` | Reference for the main loop: place → check 5-in-a-row → clear + disrupt → score → next player. Spring-coupled and won't compile in isolation, but the flow is what matters. |
 | `MoveStrategy.java` + `RandomMoveStrategy.java` + `SmartMoveStrategy.java` | AI strategies the TS `ai.ts` was based on. The original `SmartMoveStrategy` had a single-direction `checkLine` bug — the TS version fixes it. |
-| `User.java` + `UserPool.java` | Data shape for users (`username` + `score`). Persistence in the original was a no-op; in the rewrite we use KV. |
+| `User.java` + `UserPool.java` | Data shape for users (`username` + `score`). Persistence in the original was a no-op; the rewrite ultimately dropped persistent user records too — identity is room-scoped and ephemeral, living in the `GameRoom` DO and dying with the room. |
 | `Poem/Poem.java` + `Poem/PoemService.java` | Original inlined poem strings used as the win-screen flourish. The TS rewrite ships a curated 8-poem list inline at `src/worker/poems.ts` rather than seeding KV — the list is small, immutable, and KV would just add an extra read per round end. |
 
 `Gomoku/legacy-frontend/` holds a snapshot of the old static frontend (`index.html`, `script.js`, `style.css`) plus a short `README.md` indexing what's worth lifting — the typewriter poem reveal in `style.css:102-126` triggered by `script.js:45-62` is the main one. **Do not run or import it**; it's read-only animation reference.
@@ -47,7 +47,8 @@ Every `GameRoom` Durable Object seats one AI player (`username = "Bot"`, color `
 - **Seats**: max 4 humans + 1 bot. Human colors `black / white / red / blue` assigned in join order; bot fixed `amber`.
 - **5-in-a-row in N-player**: clear winner's lines; then for **each** other player (including bot), randomly remove `clearedSelf` of their stones.
 - **Single alarm slot, three uses**: `bot_move` (+1500ms when bot's turn — long enough for the previous move + any clear/disrupt animation to register), `turn_timeout` (+3min on a connected human's turn, **only when ≥2 humans are in the room** — solo-human-vs-bot rooms skip the deadline since there's nobody else waiting), `room_gc` (+5min when no humans connected → `destroy()`). Stored in `alarm_reason`; reconciled by `rescheduleAlarm()` after every state mutation.
-- **Score persistence**: per-room scores live entirely in the DO (`bumpPlayerScore` writes to DO storage) and are scoped to the room's current round. They are NOT mirrored to KV — KV holds only the identity record (username + token); the once-planned cross-room cumulative total was dropped in favour of per-room scoring.
+- **Score persistence**: per-room scores live entirely in the DO (`bumpPlayerScore` writes to DO storage) and are scoped to the room's current round. They are NOT mirrored to KV — KV holds only the public-room lobby index. There is no global user store; identity is room-scoped and ephemeral (see below).
+- **Identity is room-scoped, not global**: there is no account, claim, or KV user record. Every WS opens as a spectator; a player takes a seat in-band by sending a `join` (name + a client-generated seat token). `ensureSeat` enforces name uniqueness *within the room only* and binds the seat to the token — a reconnect with the matching token reclaims the seat; a mismatch reports `name_taken`. The same name is freely reusable in a different room, and the seat (name+token) is stored client-side per room (`localStorage["gomoku.seat:<code>"]`). Giving up a seat (`resign`) frees the name and downgrades the socket back to spectator.
 
 ## `apps/gomoku-cf/` — the active project
 
@@ -60,20 +61,21 @@ apps/gomoku-cf/
 │   │   ├── main.tsx, App.tsx, index.css # entry + Tailwind + typewriter @keyframes
 │   │   ├── pages/GamePage.tsx           # the only page: board (left) + sidebar (right)
 │   │   ├── components/                  # Board, PoemHeader, LobbyWidget, PlayerList,
-│   │   │                                  RoomWidget, UserBadge, SignInCard
-│   │   ├── hooks/                       # useIdentity, useMultiPlayerGame
-│   │   │                                  (WS + reconnect + ClearEvent/poem)
+│   │   │                                  RoomWidget, SignInCard
+│   │   ├── hooks/                       # useRoomSeat (per-room name+token),
+│   │   │                                  useMultiPlayerGame (WS + reconnect +
+│   │   │                                  in-band join + ClearEvent/poem)
 │   │   └── lib/                         # api.ts (REST client), randomName
 │   ├── worker/                          # Cloudflare Worker
 │   │   ├── index.ts                     # Hono entry, exports GameRoom DO, mounts routes
-│   │   ├── routes/                      # user.ts (claim), room.ts
+│   │   ├── routes/                      # room.ts
 │   │   │                                  (create/list/meta/ws-upgrade)
-│   │   ├── do/GameRoom.ts               # the per-room DO: seats, turn rotation, single
+│   │   ├── do/GameRoom.ts               # the per-room DO: seats (in-band join +
+│   │   │                                  seat token), turn rotation, single
 │   │   │                                  alarm slot, restartRound
 │   │   ├── game/                        # board.ts, ai.ts — pure, marker-agnostic
 │   │   │                                  (any string is a valid Cell value)
-│   │   ├── kv/                          # users.ts (claim), rooms.ts
-│   │   │                                  (public lobby index), types.ts
+│   │   ├── kv/                          # rooms.ts (public lobby index)
 │   │   └── poems.ts                     # inline Tang quatrains for the scoring flourish
 │   └── shared/protocol.ts               # Zod schemas + types for ALL cross-boundary
 │                                          traffic (REST + WS)
@@ -85,9 +87,11 @@ apps/gomoku-cf/
 
 ### Single-page architecture
 
-There is **no in-app navigation**. After WelcomeModal claims a username,
-`App.tsx` auto-creates a private room (or rehydrates the last room code
-from `localStorage["gomoku.lastRoom"]`) and renders `GamePage` directly.
+There is **no in-app navigation** and no sign-in gate. On load `App.tsx`
+rehydrates the last room code from `localStorage["gomoku.lastRoom"]` (or
+auto-creates a private room) and renders `GamePage` directly — you land
+on a live board as a spectator. Naming happens in-room: clicking the
+board prompts for a room-scoped name, which takes a seat.
 A user can switch rooms from the sidebar's RoomWidget (new public /
 new private / join by code) or LobbyWidget (click any public room) —
 those updates only change `App.tsx`'s `roomCode` state, which
@@ -111,17 +115,17 @@ npm run cf-typegen   # regenerate worker-configuration.d.ts after wrangler.jsonc
 ### Critical conventions
 
 - **`src/shared/protocol.ts` is the only source of truth for cross-boundary types.** Both worker and react-app import from it. Adding a new WS message or REST endpoint? Add a Zod schema here first.
-- **`UsernameSchema`: 1-16 chars, `[a-zA-Z0-9_]` only.** CJK was considered and dropped — non-ASCII round-tripping through URLs, KV keys, and shell scripts caused bugs without enough product value. `"Bot"` is reserved (`ensureSeat` rejects it for humans).
-- **`Cell = string | null`.** A non-empty marker (username or a legacy `"black"/"white"` tag in single-player). Game functions (`placeStone`, `hasFiveInARow`, `clearWinningLines`, `smartMove`) accept any string identifier — that's what lets the same engine drive 2-color single-player AND N-player rooms.
-- **Durable Object: SQLite-backed, Hibernation API.** `GameRoom.fetch` accepts WS upgrades via `ctx.acceptWebSocket(server)` — never call `ws.accept()` (that disables hibernation and burns GB-s). Sockets carry `{ username }` via `serializeAttachment` so identity survives wake-up.
-- **DO auth is in the DO** (not the Worker). The browser WebSocket API can't send headers, so the WS upgrade URL carries `?username=X&token=Y` which the DO validates against KV before accepting. URL is over TLS but visible in access logs — acceptable for a casual game.
+- **`UsernameSchema`: 1-16 chars, `[a-zA-Z0-9_]` only.** CJK was considered and dropped — non-ASCII round-tripping through URLs, KV keys, and shell scripts caused bugs without enough product value. `"Bot"` is reserved (`ensureSeat` rejects it for humans). Uniqueness is **room-scoped**, enforced by the DO — not global.
+- **`Cell = string | null`.** A non-empty marker (a player's username). Game functions (`placeStone`, `hasFiveInARow`, `clearWinningLines`, `smartMove`) accept any string identifier — that's what lets the same engine drive the bot and N human players uniformly.
+- **Durable Object: SQLite-backed, Hibernation API.** `GameRoom.fetch` accepts WS upgrades via `ctx.acceptWebSocket(server)` — never call `ws.accept()` (that disables hibernation and burns GB-s). Sockets carry `{ username }` (null = spectator) via `serializeAttachment` so identity survives wake-up; it's updated in place when a socket takes or gives up a seat.
+- **Seating is in-band, room-scoped, and done by the DO** (not the Worker, not KV). Every socket opens as a spectator; the client sends a `join` (name + client-generated seat token), which `ensureSeat` validates against the DO's own player list — name free → seat it; name held with matching token → reconnect; mismatch → `name_taken`. No global user store, no URL credentials.
 - **Single alarm slot in `GameRoom`** drives three concerns: `bot_move`, `turn_timeout`, `room_gc`. Recompute via `rescheduleAlarm()` after every state mutation; never set the alarm directly. The handler in `alarm()` reads `alarm_reason` from storage and re-validates the precondition (a reconnect can race the GC).
 - **KV binding ID in `wrangler.jsonc` is a real namespace id**, not a placeholder. Local dev (Miniflare) uses an in-memory store and ignores it; production reads/writes the real namespace.
 - **`compatibility_date`**: pinned to `2025-11-25` because the bundled workerd doesn't support later dates. Bump only when upgrading wrangler/workerd.
 - **`run_worker_first: ["/api/*"]` in `assets` config**: Worker handles `/api/*` first; all other paths fall through to the SPA bundle.
 - **Re-export the DO class from `src/worker/index.ts`** (`export { GameRoom } from "./do/GameRoom";`) — wrangler binds DO classes by import from the main module.
 - **Game functions are pure + immutable.** `placeStone` / `clearWinningLines` return new boards; never mutate the input. The RNG used by `clearWinningLines` is injected for testability.
-- **Token = 128 hex chars** (64 random bytes from `crypto.getRandomValues`). Compared in constant time. Stored in KV `user:<username>.token` and in the browser's `localStorage`.
+- **Seat token = 128 hex chars** (64 random bytes from `crypto.getRandomValues`), generated **client-side** in `useRoomSeat`. It's a per-room seat secret, not a global credential: stored in `localStorage["gomoku.seat:<code>"]`, sent with `join`, and bound to the name by the DO. A reconnect presenting the same token reclaims the seat.
 
 ## Milestones progress
 
@@ -133,6 +137,7 @@ npm run cf-typegen   # regenerate worker-configuration.d.ts after wrangler.jsonc
 - **M3** — single-player vs AI: responsive SVG board, `useSinglePlayerGame` hook, `POST /api/user/score`, `ScoreToast` for 5-in-a-row clear events. 59 tests total.
 - **M4** — multiplayer rooms with always-present bot. `Cell` decoupled from stone color; `GameRoom` DO + WS Hibernation; public/private room visibility + KV lobby index; `/api/room` create/list/meta/ws routes; multi-color `Board` + `PlayerStrip` chips; `useMultiPlayerGame` WS hook. 64 tests.
 - **M5** — round end + polish. 3-min per-turn timeout (only when ≥2 humans) + 5-min-idle room GC sharing one alarm slot via `rescheduleAlarm`; random Tang poem on each scoring clear, typewritten in the page header via `PoemHeader` (JS-driven for CJK); 10s lobby auto-refresh; mobile-friendly top bars + touch targets. Later reworked: dropped the first-to-5 auto-end / `EndScreen` in favour of open-ended per-room scoring.
-- **M6.x** — single-page rewrite of the frontend. Dropped the 4-view router (`HomePage` / `SinglePlayerPage` / `LobbyPage` / `MultiPlayerPage`) and the standalone single-player engine (`useSinglePlayerGame`, `lib/singlePlayer*`, `ScoreToast`, horizontal `PlayerStrip`) in favour of one `GamePage` with a board + right sidebar (`RoomWidget` for current-room controls, vertical `PlayerList`, `LobbyWidget` for public rooms). After identity claim, `App.tsx` auto-creates a private room so the user lands on a playable board with no intermediate menu. 58 tests (down from 68 — singlePlayer.test removed).
+- **M6.x** — single-page rewrite of the frontend. Dropped the 4-view router (`HomePage` / `SinglePlayerPage` / `LobbyPage` / `MultiPlayerPage`) and the standalone single-player engine (`useSinglePlayerGame`, `lib/singlePlayer*`, `ScoreToast`, horizontal `PlayerStrip`) in favour of one `GamePage` with a board + right sidebar (`RoomWidget` for current-room controls, vertical `PlayerList`, `LobbyWidget` for public rooms). `App.tsx` auto-creates a private room so the user lands on a playable board with no intermediate menu.
+- **M7** — room-scoped ephemeral identity. Removed the entire global user layer: `/api/user/*` routes (claim/rename/score), the `kv/users.ts` adapter + `kv/types.ts`, `useIdentity`, `UserBadge`, and the global token. Identity is now established in-band over WS via a `join` (name + client-generated seat token), unique per-room only, stored in `localStorage` per room; the same name is reusable across rooms and nothing persists to KV but the lobby index. You land as a spectator and name yourself only when taking a seat. Also fixed `advanceTurn` to wrap to the front when the current turn-holder leaves the order. 42 tests.
 
 Production runs on Cloudflare Workers Builds — push to `rewrite/serverless` auto-deploys; PRs against it get isolated preview deployments. See `apps/gomoku-cf/README.md` for the operational guide.

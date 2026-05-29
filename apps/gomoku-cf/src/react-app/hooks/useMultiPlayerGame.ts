@@ -8,6 +8,7 @@ import {
 	type RoomVisibility,
 	type ServerMessage,
 } from "../../shared/protocol";
+import type { Seat } from "./useRoomSeat";
 
 export type ConnectionStatus =
 	| "connecting"
@@ -39,26 +40,39 @@ export interface TimeoutEvent {
 	username: string;
 }
 
+/** A failed seat attempt (e.g. the chosen name is taken in this room). */
+export interface SeatRejection {
+	id: number;
+	code: string;
+	message: string;
+}
+
 interface Options {
 	roomCode: string;
 	/**
-	 * Credentials of the signed-in user, or null for spectator mode.
-	 * When null, the WS upgrade omits both query params; the DO accepts
-	 * the connection, streams state/move/clear/end broadcasts, but
-	 * rejects any place/restart/resign with a "spectator_only" error.
+	 * The room-scoped seat, or null for spectator mode. Every socket opens
+	 * as a spectator; when a seat is present the hook sends an in-band
+	 * `join` to claim/reclaim it. place/restart are gated on having a seat.
 	 */
-	username: string | null;
-	token: string | null;
+	seat: Seat | null;
 }
 
 const RECONNECT_MS = 2000;
+// Error codes that mean "your seat attempt was refused" rather than a
+// transient gameplay error — surfaced separately so the UI can re-prompt.
+const SEAT_REJECT_CODES = new Set([
+	"name_taken",
+	"room_full",
+	"username_reserved",
+]);
 
-export function useMultiPlayerGame({ roomCode, username, token }: Options) {
+export function useMultiPlayerGame({ roomCode, seat }: Options) {
 	const [connection, setConnection] = useState<ConnectionStatus>("connecting");
 	const [state, setState] = useState<RoomState | null>(null);
 	const [lastClear, setLastClear] = useState<ClearEvent | null>(null);
 	const [lastTimeout, setLastTimeout] = useState<TimeoutEvent | null>(null);
 	const [errorMsg, setErrorMsg] = useState<string | null>(null);
+	const [seatRejection, setSeatRejection] = useState<SeatRejection | null>(null);
 
 	const wsRef = useRef<WebSocket | null>(null);
 	const reconnectTimerRef = useRef<number | null>(null);
@@ -68,17 +82,25 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 	// did. Stored in a ref so a new state push doesn't blow it away.
 	const lastMoveRef = useRef<RoomState["lastMove"]>(null);
 	const cancelledRef = useRef(false);
+	// Latest seat, read inside ws.onopen (a closure created at connect time).
+	const seatRef = useRef<Seat | null>(seat);
+	seatRef.current = seat;
+
+	const sendJoin = useCallback(() => {
+		const s = seatRef.current;
+		const ws = wsRef.current;
+		if (!s || !ws || ws.readyState !== WebSocket.OPEN) return;
+		ws.send(
+			JSON.stringify({ type: "join", username: s.username, token: s.token })
+		);
+	}, []);
 
 	const connect = useCallback(() => {
 		cancelledRef.current = false;
 		const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-		// Anonymous connect omits both query params — the DO interprets
-		// that as a spectator-mode upgrade.
-		const auth =
-			username && token
-				? `?username=${encodeURIComponent(username)}&token=${encodeURIComponent(token)}`
-				: "";
-		const url = `${proto}//${window.location.host}/api/room/${roomCode}/ws${auth}`;
+		// No credentials in the URL — the socket always opens as a
+		// spectator and seating is negotiated in-band via `join`.
+		const url = `${proto}//${window.location.host}/api/room/${roomCode}/ws`;
 		setConnection("connecting");
 		setErrorMsg(null);
 		const ws = new WebSocket(url);
@@ -86,6 +108,8 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 
 		ws.onopen = () => {
 			setConnection("open");
+			// Reclaim (or take) our seat if we have one.
+			sendJoin();
 		};
 
 		ws.onmessage = (ev) => {
@@ -136,7 +160,15 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 					});
 					break;
 				case "error":
-					setErrorMsg(parsed.message);
+					if (SEAT_REJECT_CODES.has(parsed.code)) {
+						setSeatRejection({
+							id: ++eventIdRef.current,
+							code: parsed.code,
+							message: parsed.message,
+						});
+					} else {
+						setErrorMsg(parsed.message);
+					}
 					break;
 			}
 		};
@@ -151,7 +183,7 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		ws.onerror = () => {
 			setConnection("error");
 		};
-	}, [roomCode, username, token]);
+	}, [roomCode, sendJoin]);
 
 	useEffect(() => {
 		connect();
@@ -166,24 +198,39 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		};
 	}, [connect]);
 
-	const isSpectator = !username || !token;
+	// Send `join` when a seat appears while the socket is already open
+	// (i.e. the user just picked a name). Connecting-then-seated is handled
+	// by ws.onopen; this covers the open-then-seated order.
+	useEffect(() => {
+		if (connection === "open" && seat) sendJoin();
+	}, [connection, seat, sendJoin]);
+
+	const isSpectator = !seat;
 
 	const place = useCallback(
 		(row: number, col: number) => {
-			if (isSpectator) return; // UI surfaces the sign-in prompt; just no-op here.
+			if (!seat) return; // UI surfaces the sign-in prompt; just no-op here.
 			const ws = wsRef.current;
 			if (!ws || ws.readyState !== WebSocket.OPEN) return;
 			ws.send(JSON.stringify({ type: "place", row, col }));
 		},
-		[isSpectator]
+		[seat]
 	);
 
 	const restart = useCallback(() => {
-		if (isSpectator) return;
+		if (!seat) return;
 		const ws = wsRef.current;
 		if (!ws || ws.readyState !== WebSocket.OPEN) return;
 		ws.send(JSON.stringify({ type: "restart" }));
-	}, [isSpectator]);
+	}, [seat]);
+
+	// Give up the current seat (stay connected as a spectator). The caller
+	// is responsible for clearing its local seat afterwards.
+	const leaveSeat = useCallback(() => {
+		const ws = wsRef.current;
+		if (!ws || ws.readyState !== WebSocket.OPEN) return;
+		ws.send(JSON.stringify({ type: "resign" }));
+	}, []);
 
 	// Also drop lastMove on restart so the new round opens with a clean
 	// indicator rather than the previous round's final dot.
@@ -195,7 +242,7 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		}
 	}, [state?.status, state?.board]);
 
-	const isMyTurn = !!username && state?.turn === username;
+	const isMyTurn = !!seat && state?.turn === seat.username;
 
 	return {
 		connection,
@@ -205,7 +252,9 @@ export function useMultiPlayerGame({ roomCode, username, token }: Options) {
 		lastClear,
 		lastTimeout,
 		errorMsg,
+		seatRejection,
 		place,
 		restart,
+		leaveSeat,
 	};
 }

@@ -6,7 +6,6 @@ import {
 	RoomCodeSchema,
 	type RoomSummary,
 } from "../../shared/protocol";
-import { getUser } from "../kv/users";
 import { listPublicRooms } from "../kv/rooms";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -33,16 +32,13 @@ app.post("/", async (c) => {
 			400
 		);
 	}
-	const { username, token, visibility } = parsed.data;
+	const { visibility } = parsed.data;
 
-	const user = await getUser(c.env.KV, username);
-	if (!user || user.token !== token) {
-		return c.json({ error: "unauthorized" }, 401);
-	}
-
-	// Try a few codes — collision is extraordinarily rare on a
-	// ~28-bit space but DOs can be recycled and previously-used codes
-	// won't always be free.
+	// Anyone can create a room — there is no global account. Identity is
+	// established later, room-scoped, when a player takes a seat over WS.
+	// Try a few codes — collision is extraordinarily rare on a ~28-bit
+	// space but DOs can be recycled and previously-used codes won't
+	// always be free.
 	for (let attempt = 0; attempt < 5; attempt++) {
 		const code = generateRoomCode();
 		const id = c.env.GAME_ROOM.idFromName(code);
@@ -50,7 +46,7 @@ app.post("/", async (c) => {
 		const initRes = await stub.fetch("https://do/init", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ code, visibility, creator: username }),
+			body: JSON.stringify({ code, visibility }),
 		});
 		if (initRes.status === 409) {
 			continue; // code already in use, try another

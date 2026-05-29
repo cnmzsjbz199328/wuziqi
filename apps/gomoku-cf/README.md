@@ -1,8 +1,8 @@
 # gomoku-cf
 
 Non-standard Gomoku on Cloudflare Workers. React + Vite SPA, Hono Worker,
-SQLite-backed Durable Objects for real-time rooms, KV for user records.
-All within the Workers free plan.
+SQLite-backed Durable Objects for real-time rooms, KV for the public-room
+lobby index. All within the Workers free plan.
 
 ```
 Browser (React SPA)
@@ -10,7 +10,6 @@ Browser (React SPA)
        ▼
 Cloudflare Worker (Hono)
        │
-       ├── /api/user/*  ──► KV (claim)
        ├── /api/room    ──► KV (public lobby index) + Durable Object
        ├── /api/room/:code/ws ► Durable Object WS upgrade (Hibernation)
        └── /*           ──► static assets (the SPA bundle)
@@ -18,20 +17,21 @@ Cloudflare Worker (Hono)
 
 ## What it is
 
-Two play modes:
+A single shared board per room: up to 4 humans + 1 always-present bot.
+Public rooms appear in the lobby; private rooms are joined by 6-char code.
+The bot keeps a 1-human room playable and gives 2+ human rooms a fourth
+actor that breaks up 1v1 standoffs.
 
-- **Single-player vs local AI** — pure client-side game state, scores
-  posted to KV via `POST /api/user/score`.
-- **Multiplayer rooms** — up to 4 humans + 1 always-present bot per room.
-  Public rooms appear in the lobby; private rooms are joined by 6-char
-  code. The bot keeps a 1-human room playable and gives 2+ human rooms
-  a third actor that breaks up 1v1 standoffs.
+Identity is **room-scoped and ephemeral** — there is no account or global
+sign-in. You land on a board as a spectator and pick a name only when you
+take a seat; that name is unique within the room but reusable in another
+room, and everything evaporates when the room is GC'd.
 
-5-in-a-row is **not the win condition** — it's a scoring event: clear
-the winner's connected stones, randomly disrupt the same count from
-every other player on board, score `max(0, clearedSelf - 4)`. First to
-**5 in-room points** ends the round; the server picks a random Tang
-quatrain to reveal as the win flourish.
+5-in-a-row is **not the win condition** — it's a scoring event: clear the
+winner's connected stones, randomly disrupt the same count from every
+other player on board, score `max(0, clearedSelf - 4)`. There is no
+auto-end; each scoring clear reveals a random Tang quatrain in the page
+header. Per-room scores reset only on a manual restart.
 
 ## Local development
 
@@ -61,8 +61,9 @@ this project (we've verified we stay inside its limits — see
 
 ### 2. Create the KV namespace (dashboard, 30 seconds)
 
-The Worker reads and writes user records to KV. The namespace must exist
-*before* the first deploy, otherwise runtime calls will fail.
+The Worker reads and writes the public-room lobby index to KV. The
+namespace must exist *before* the first deploy, otherwise runtime calls
+will fail.
 
 1. Dashboard → **Storage & Databases** → **KV**
 2. **Create a namespace** → name it `gomoku-cf-kv` → **Add**
@@ -119,14 +120,14 @@ curl -fs $URL/api/_bindings
 # → {"kv":true,"gameRoom":true,"assets":true}
 
 curl -fs -X POST -H 'Content-Type: application/json' \
-  -d '{"username":"smoketest"}' \
-  $URL/api/user/claim
-# → {"username":"smoketest","token":"<128 hex chars>"}
+  -d '{"visibility":"public"}' \
+  $URL/api/room
+# → {"roomCode":"ABC234","visibility":"public"}
 ```
 
-Then open `$URL` in a browser — you should land on the welcome modal
-with the two-button "🎲 Random / ✏️ Custom" choice, then on the home
-screen with **单机 vs AI** / **进入大厅(多人)** entry points.
+Then open `$URL` in a browser — you should land directly on a board (a
+private room auto-created for you) as a spectator. Click an empty
+intersection to be prompted for a room-scoped name, then play.
 
 ## Subsequent deploys
 
@@ -201,33 +202,26 @@ Or Dashboard → Workers & Pages → `gomoku-cf` → **Logs**.
 After deploy, on the live URL:
 
 ```bash
-# Claim a short test username (≤16 chars, [a-zA-Z0-9_])
-curl -s -X POST https://<your>.workers.dev/api/user/claim \
-  -H "Content-Type: application/json" \
-  -d '{"username":"smoke1"}'
-# Capture the `token` from the response.
-
-# Create a public room
+# Create a public room (no auth — identity is room-scoped, established
+# later over WS when a player takes a seat).
 curl -s -X POST https://<your>.workers.dev/api/room \
   -H "Content-Type: application/json" \
-  -d '{"username":"smoke1","token":"<TOKEN>","visibility":"public"}'
+  -d '{"visibility":"public"}'
 # → { "roomCode": "ABC123", "visibility": "public" }
 
 # Confirm it shows up in the lobby (KV has ~60s consistency window;
-# `players: ["Bot"]` is the expected initial state since the creator
-# hasn't WS-connected yet).
+# `players: ["Bot"]` is the expected initial state since no human has
+# taken a seat yet).
 curl -s https://<your>.workers.dev/api/room
 ```
 
-Then open the live URL in two browser windows under different usernames,
-join the same code, and verify the player strip + turn rotation +
-poem-on-win flow.
+Then open the live URL in two browser windows, join the same code, take
+a seat with a name in each, and verify the player list + turn rotation +
+poem-on-score flow.
 
 ## Post-launch ideas (not in scope yet)
 
-- `/api/leaderboard` aggregating KV `user:*` totals
 - In-room chat (would extend `protocol.ts` with a `ClientChat` /
   `ServerChat` message pair)
 - Sound effects (place / clear / win)
-- "Spectator" seat that joins without taking a color
-- Configurable round-win threshold per room
+- Configurable board size / win length per room

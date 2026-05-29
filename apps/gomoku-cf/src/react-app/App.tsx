@@ -2,9 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Board } from "./components/Board";
 import { LobbyWidget } from "./components/LobbyWidget";
 import { PoemHeader } from "./components/PoemHeader";
-import { SignInCard } from "./components/SignInCard";
-import { UserBadge } from "./components/UserBadge";
-import { useIdentity } from "./hooks/useIdentity";
 import { ApiError, api } from "./lib/api";
 import { GamePage } from "./pages/GamePage";
 import {
@@ -38,16 +35,13 @@ function writeStoredRoom(code: string | null) {
 	}
 }
 
-// A 15x15 grid of empty cells used as the board placeholder before
-// sign-in (or while the room is being created). The user sees the
-// product immediately — board + lobby — without a blocking modal.
+// A 15x15 grid of empty cells used as the board placeholder while the
+// first room is being created, so the user sees the product immediately.
 const EMPTY_BOARD: BoardType = Array.from({ length: BOARD_SIZE }, () =>
 	Array.from({ length: BOARD_SIZE }, (): Cell => null)
 );
 
 function App() {
-	const { state, claimRandom, claimCustom, signOut } = useIdentity();
-
 	const [roomCode, setRoomCode] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [appError, setAppError] = useState<string | null>(null);
@@ -62,15 +56,11 @@ function App() {
 
 	const createRoom = useCallback(
 		async (visibility: RoomVisibility) => {
-			if (state.status !== "ready" || busy) return;
+			if (busy) return;
 			setBusy(true);
 			setAppError(null);
 			try {
-				const res = await api.createRoom({
-					username: state.identity.username,
-					token: state.identity.token,
-					visibility,
-				});
+				const res = await api.createRoom({ visibility });
 				switchRoom(res.roomCode);
 			} catch (e) {
 				setAppError(e instanceof ApiError ? e.code : "create_failed");
@@ -78,13 +68,13 @@ function App() {
 				setBusy(false);
 			}
 		},
-		[state, busy, switchRoom]
+		[busy, switchRoom]
 	);
 
-	// After identity claim, rehydrate the last room (or auto-create a
-	// private one) so the user lands directly on a playable board.
+	// Land everyone directly on a playable board: rehydrate the last room
+	// or auto-create a private one. There is no sign-in gate — naming
+	// happens in-room, when the visitor decides to take a seat.
 	useEffect(() => {
-		if (state.status !== "ready") return;
 		if (roomCode !== null) return;
 		if (bootstrappingRef.current) return;
 
@@ -97,11 +87,7 @@ function App() {
 		bootstrappingRef.current = true;
 		(async () => {
 			try {
-				const res = await api.createRoom({
-					username: state.identity.username,
-					token: state.identity.token,
-					visibility: "private",
-				});
+				const res = await api.createRoom({ visibility: "private" });
 				setRoomCode(res.roomCode);
 				writeStoredRoom(res.roomCode);
 			} catch (e) {
@@ -110,66 +96,28 @@ function App() {
 				bootstrappingRef.current = false;
 			}
 		})();
-	}, [state, roomCode]);
+	}, [roomCode]);
 
-	const handleSignOut = useCallback(() => {
-		writeStoredRoom(null);
-		setRoomCode(null);
-		signOut();
-	}, [signOut]);
-
-	const identity = state.status === "ready" ? state.identity : null;
-
-	const randomSignIn = useCallback(async () => {
-		await claimRandom();
-	}, [claimRandom]);
-
-	const customSignIn = useCallback(
-		async (name: string) => {
-			await claimCustom(name);
-		},
-		[claimCustom]
-	);
-
-	const showPoem = useCallback((poem: Poem) => {
-		setHeaderPoem(poem);
-	}, []);
-
-	const clearPoem = useCallback(() => {
-		setHeaderPoem(null);
-	}, []);
+	const showPoem = useCallback((poem: Poem) => setHeaderPoem(poem), []);
+	const clearPoem = useCallback(() => setHeaderPoem(null), []);
 
 	return (
 		<div className="min-h-screen bg-stone-900 text-stone-100">
 			<header className="flex items-center justify-between gap-3 px-4 sm:px-6 py-3 border-b border-stone-800">
 				<PoemHeader poem={headerPoem} onDone={clearPoem} />
-				{state.status === "ready" && (
-					<UserBadge
-						identity={state.identity}
-						onSignOut={handleSignOut}
-					/>
-				)}
 			</header>
 
 			<main className="max-w-6xl mx-auto px-3 sm:px-6 py-5">
 				{roomCode ? (
 					<GamePage
-						identity={identity}
 						roomCode={roomCode}
 						busy={busy}
 						onCreateRoom={createRoom}
 						onJoinRoom={switchRoom}
-						onRandomSignIn={randomSignIn}
-						onCustomSignIn={customSignIn}
 						onPoem={showPoem}
 					/>
 				) : (
-					<LandingShell
-						anonymous={state.status === "anonymous"}
-						onRandom={randomSignIn}
-						onCustom={customSignIn}
-						onJoinRoom={switchRoom}
-					/>
+					<LandingShell onJoinRoom={switchRoom} />
 				)}
 			</main>
 
@@ -182,8 +130,6 @@ function App() {
 						? "进入房间失败,刷新重试"
 						: appError === "create_failed"
 						? "创建房间失败"
-						: appError === "unauthorized"
-						? "登录已过期"
 						: appError}
 				</div>
 			)}
@@ -192,29 +138,17 @@ function App() {
 }
 
 /**
- * The two-column shell rendered before a real game is connected:
- * empty board on the left, SignInCard (or a loading note) + lobby on
- * the right. Matches the layout the logged-in GamePage uses so the
- * transition into a live game doesn't shift the page around.
+ * Shown only briefly while the first room is being created: empty board
+ * on the left, lobby on the right (so the visitor can jump into a public
+ * room instead of waiting). Matches the GamePage layout so the handoff
+ * into a live game doesn't shift the page around.
  */
-function LandingShell({
-	anonymous,
-	onRandom,
-	onCustom,
-	onJoinRoom,
-}: {
-	anonymous: boolean;
-	onRandom: () => Promise<void>;
-	onCustom: (name: string) => Promise<void>;
-	onJoinRoom: (code: string) => void;
-}) {
+function LandingShell({ onJoinRoom }: { onJoinRoom: (code: string) => void }) {
 	return (
 		<div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4 lg:gap-6">
 			<div className="space-y-3">
 				<div className="text-center text-base font-medium text-stone-400">
-					{anonymous
-						? "点击右侧公开房间观战,或先登记昵称开局"
-						: "正在分配房间…"}
+					正在分配房间…
 				</div>
 				<div className="max-w-xl mx-auto">
 					<Board
@@ -230,16 +164,9 @@ function LandingShell({
 			</div>
 
 			<aside className="space-y-3">
-				{anonymous ? (
-					<SignInCard onRandom={onRandom} onCustom={onCustom} />
-				) : (
-					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3">
-						<p className="text-stone-400 text-sm">连接房间中…</p>
-					</section>
-				)}
-				{/* Clicking a public room moves the user into spectator
-				    mode (anonymous) or seats them (signed-in) — the
-				    GamePage branch handles both via useMultiPlayerGame. */}
+				<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3">
+					<p className="text-stone-400 text-sm">连接房间中…</p>
+				</section>
 				<LobbyWidget currentRoom="" onJoinRoom={onJoinRoom} />
 			</aside>
 		</div>

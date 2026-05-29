@@ -12,11 +12,14 @@
 //     attaches { username } so the DO can resume identifying which
 //     socket belongs to whom after wake-up without an in-memory map.
 //
-// Auth is done by the DO itself (not the Worker): the WS upgrade URL
-// carries ?username=X&token=Y, which we validate against KV before
-// accepting. The browser WebSocket API can't send custom headers, so
-// query params are the only option; the URL travels over TLS but is
-// visible in access logs — acceptable for a casual game.
+// Identity is room-scoped and established in-band, not globally. Every
+// socket connects as a spectator (no credentials). To sit down a client
+// sends a `join` message carrying a name + a client-generated seat token;
+// the DO records (name → token) for the seat, enforces name uniqueness
+// *within this room only*, and lets a reconnect reclaim the seat by
+// presenting the same token. There is no global user store — the same
+// name can be used freely in different rooms, and everything evaporates
+// when the room is GC'd.
 
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -38,7 +41,6 @@ import {
 	placeStone,
 	scoreForClear,
 } from "../game/board";
-import { getUser } from "../kv/users";
 import {
 	removePublicRoom,
 	upsertPublicRoom,
@@ -67,6 +69,21 @@ const ROOM_GC_MS = 5 * 60_000;
 
 type AlarmReason = "bot_move" | "turn_timeout" | "room_gc";
 
+// User-facing (Chinese) message for a failed seat attempt. The code is
+// also sent so the client can branch (e.g. re-open the name prompt).
+function joinErrorMessage(reason: string): string {
+	switch (reason) {
+		case "name_taken":
+			return "这个名字本房已有人用,换一个吧";
+		case "room_full":
+			return "本房人数已满";
+		case "username_reserved":
+			return "这个名字是保留名,换一个吧";
+		default:
+			return "无法入座,换个名字试试";
+	}
+}
+
 interface StoredMeta {
 	code: string;
 	visibility: RoomVisibility;
@@ -79,6 +96,10 @@ interface StoredPlayer {
 	isBot: boolean;
 	joinedAt: number;
 	score: number; // accumulated in this room only
+	// Client-generated secret binding this seat. Empty for the bot.
+	// A reconnect must present the same token to reclaim the name; a
+	// mismatch means someone else is using that name → "name_taken".
+	token: string;
 }
 
 /**
@@ -122,12 +143,11 @@ export class GameRoom extends DurableObject<Env> {
 			});
 		}
 		const body = (await request.json().catch(() => null)) as
-			| { code?: string; visibility?: RoomVisibility; creator?: string }
+			| { code?: string; visibility?: RoomVisibility }
 			| null;
 		if (
 			!body?.code ||
-			(body.visibility !== "public" && body.visibility !== "private") ||
-			!body.creator
+			(body.visibility !== "public" && body.visibility !== "private")
 		) {
 			return new Response(JSON.stringify({ error: "invalid_init" }), {
 				status: 400,
@@ -146,6 +166,7 @@ export class GameRoom extends DurableObject<Env> {
 				isBot: true,
 				joinedAt: Date.now(),
 				score: 0,
+				token: "",
 			},
 		];
 		await this.storage().put({
@@ -154,10 +175,9 @@ export class GameRoom extends DurableObject<Env> {
 			board: createBoard(),
 			status: "waiting" as GameStatus,
 		});
-		// Creator is seated lazily on their WS upgrade; only meta+bot
-		// land here. This keeps init idempotent on the creator side
-		// (they'll connect right after) and avoids a "ghost" seat if the
-		// browser never finishes the join.
+		// Only meta + bot land here. Humans seat themselves later by
+		// sending a `join` over their (initially spectator) socket, so a
+		// room never has a "ghost" seat for someone who only ever looked.
 		if (meta.visibility === "public") {
 			await this.publishLobbyEntry();
 		}
@@ -195,71 +215,49 @@ export class GameRoom extends DurableObject<Env> {
 		if (request.headers.get("Upgrade") !== "websocket") {
 			return new Response("Expected WebSocket", { status: 400 });
 		}
-		const url = new URL(request.url);
-		const username = url.searchParams.get("username");
-		const token = url.searchParams.get("token");
-
 		const meta = await this.storage().get<StoredMeta>("meta");
 		if (!meta) {
 			return new Response("Room not found", { status: 404 });
 		}
 
-		// Two flavours of WS:
-		//   - Both creds present → authenticated seat. Validate token,
-		//     ensureSeat (might 409 on a full room), broadcast updated
-		//     state and reschedule the alarm since the connect can flip
-		//     the room out of room_gc territory.
-		//   - Neither present     → spectator. Accept the socket, push
-		//     current state. Spectators don't keep the room warm and
-		//     can't send place/restart (rejected in webSocketMessage).
-		//   - Exactly one present → malformed; refuse so it doesn't
-		//     silently degrade.
-		let attachedUsername: string | null = null;
-		if (username || token) {
-			if (!username || !token) {
-				return new Response("Missing credentials", { status: 400 });
-			}
-			const user = await getUser(this.env.KV, username);
-			if (!user || user.token !== token) {
-				return new Response("Unauthorized", { status: 401 });
-			}
-			const seatResult = await this.ensureSeat(username);
-			if (!seatResult.ok) {
-				return new Response(seatResult.reason, { status: 409 });
-			}
-			attachedUsername = username;
-		}
-
+		// Every socket connects as a spectator. Seating happens in-band:
+		// the client sends a `join` message (see webSocketMessage), which
+		// is where name uniqueness + the seat token are checked. Doing it
+		// there — rather than rejecting the handshake — lets us report
+		// "name_taken" as a normal error the UI can react to, since a
+		// failed WS handshake gives the browser no readable reason.
 		const pair = new WebSocketPair();
 		const [client, server] = Object.values(pair);
-		server.serializeAttachment({
-			username: attachedUsername,
-		} satisfies WsAttachment);
+		server.serializeAttachment({ username: null } satisfies WsAttachment);
 		this.ctx.acceptWebSocket(server);
 
-		// First state push happens after acceptWebSocket so this socket
-		// is included in the broadcast.
-		if (attachedUsername) {
-			await this.maybeStartPlaying();
-		}
 		await this.broadcastState();
-		if (attachedUsername) {
-			await this.rescheduleAlarm();
-		}
 
 		return new Response(null, { status: 101, webSocket: client });
 	}
 
+	/**
+	 * Seat a human in this room (or accept their reconnect). Name
+	 * uniqueness is room-scoped: a name is free unless someone in THIS
+	 * room already holds it. The seat token binds the name — a reconnect
+	 * presenting the matching token reclaims the seat; a different token
+	 * means the name is in use by someone else.
+	 */
 	private async ensureSeat(
-		username: string
+		username: string,
+		token: string
 	): Promise<{ ok: true } | { ok: false; reason: string }> {
 		if (username === BOT_USERNAME) {
 			return { ok: false, reason: "username_reserved" };
 		}
 		const players =
 			(await this.storage().get<StoredPlayer[]>("players")) ?? [];
-		if (players.some((p) => p.username === username)) {
-			return { ok: true }; // already seated, reconnect
+		const existing = players.find((p) => p.username === username);
+		if (existing) {
+			if (existing.token === token) {
+				return { ok: true }; // reconnect to own seat
+			}
+			return { ok: false, reason: "name_taken" };
 		}
 		const humans = players.filter((p) => !p.isBot);
 		if (humans.length >= MAX_HUMANS_PER_ROOM) {
@@ -276,6 +274,7 @@ export class GameRoom extends DurableObject<Env> {
 			isBot: false,
 			joinedAt: Date.now(),
 			score: 0,
+			token,
 		});
 		await this.storage().put("players", players);
 		await this.publishLobbyEntryIfPublic();
@@ -318,7 +317,10 @@ export class GameRoom extends DurableObject<Env> {
 		}
 		const current = (await this.storage().get<string>("turn")) ?? order[0];
 		const idx = order.indexOf(current);
-		const next = order[(idx === -1 ? -1 : idx + 1) % order.length];
+		// If the current turn-holder is no longer in the order (e.g. they
+		// disconnected or gave up their seat), restart from the front
+		// rather than indexing off the end.
+		const next = idx === -1 ? order[0] : order[(idx + 1) % order.length];
 		await this.storage().put("turn", next);
 		return next;
 	}
@@ -636,17 +638,65 @@ export class GameRoom extends DurableObject<Env> {
 				await this.handlePlace(att.username!, m.row, m.col);
 				return;
 			case "join":
-				// Identity is established at upgrade time; a late join is
-				// just a request for a fresh state snapshot.
-				await this.broadcastState();
+				await this.handleJoin(ws, m.username, m.token);
 				return;
 			case "restart":
 				await this.restartRound();
 				return;
 			case "resign":
-				ws.close(1000, "resigned");
+				await this.handleResign(ws, att.username);
 				return;
 		}
+	}
+
+	/**
+	 * Take a seat on this open spectator socket. On success the socket's
+	 * attachment flips to the seated name (so it now counts as a connected
+	 * human and can place/restart); a fresh `join` with the same name +
+	 * token is also how a reconnect reclaims its seat. On failure the
+	 * client gets the reason (e.g. "name_taken") and stays a spectator.
+	 */
+	private async handleJoin(
+		ws: WebSocket,
+		username: string,
+		token: string
+	): Promise<void> {
+		const seat = await this.ensureSeat(username, token);
+		if (!seat.ok) {
+			this.sendErrorToWs(ws, seat.reason, joinErrorMessage(seat.reason));
+			return;
+		}
+		ws.serializeAttachment({ username } satisfies WsAttachment);
+		await this.maybeStartPlaying();
+		await this.broadcastState();
+		await this.rescheduleAlarm();
+	}
+
+	/**
+	 * Give up the seat: free the name, color, and score so it can be
+	 * reused, and downgrade this socket back to a spectator (it stays
+	 * open). Any stones already played under that name linger on the
+	 * board as ownerless markers — they get cleared naturally as play
+	 * continues, matching the "no special-casing departures" rule.
+	 */
+	private async handleResign(
+		ws: WebSocket,
+		username: string | null
+	): Promise<void> {
+		ws.serializeAttachment({ username: null } satisfies WsAttachment);
+		if (username) {
+			const players =
+				(await this.storage().get<StoredPlayer[]>("players")) ?? [];
+			const next = players.filter((p) => p.username !== username);
+			if (next.length !== players.length) {
+				await this.storage().put("players", next);
+				const turn = (await this.storage().get<string>("turn")) ?? null;
+				if (turn === username) await this.advanceTurn();
+				await this.publishLobbyEntryIfPublic();
+			}
+		}
+		await this.broadcastState();
+		await this.rescheduleAlarm();
 	}
 
 	private sendErrorToWs(ws: WebSocket, code: string, message: string): void {

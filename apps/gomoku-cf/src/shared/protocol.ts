@@ -53,26 +53,7 @@ export type RoomVisibility = z.infer<typeof RoomVisibilitySchema>;
 
 // ---------- REST request/response schemas ----------
 
-export const ClaimRequestSchema = z.object({
-	username: UsernameSchema,
-	// Optional. When present and matching the stored token, claim is
-	// idempotent (returns the same token). When absent or mismatched on
-	// an existing username, the server replies 409.
-	token: TokenSchema.optional(),
-});
-export type ClaimRequest = z.infer<typeof ClaimRequestSchema>;
-
-export const ClaimResponseSchema = z.object({
-	username: UsernameSchema,
-	token: TokenSchema,
-	score: z.number().int().nonnegative(),
-	gamesPlayed: z.number().int().nonnegative(),
-});
-export type ClaimResponse = z.infer<typeof ClaimResponseSchema>;
-
 export const CreateRoomRequestSchema = z.object({
-	username: UsernameSchema,
-	token: TokenSchema,
 	visibility: RoomVisibilitySchema,
 });
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequestSchema>;
@@ -106,6 +87,11 @@ export type Poem = z.infer<typeof PoemSchema>;
 
 // ---------- WebSocket messages: client → server ----------
 
+// Take a seat on an already-open (spectator) socket. The name is
+// room-scoped — uniqueness is enforced per-room by the DO, not globally.
+// `token` is a client-generated secret that binds the seat: the first
+// join with a given name claims it, and only a reconnect presenting the
+// same token may reclaim it (otherwise the name is reported taken).
 export const ClientJoinSchema = z.object({
 	type: z.literal("join"),
 	username: UsernameSchema,

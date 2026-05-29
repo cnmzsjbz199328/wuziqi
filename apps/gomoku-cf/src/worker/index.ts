@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import roomRoutes from "./routes/room";
-import userRoutes from "./routes/user";
 
 export { GameRoom } from "./do/GameRoom";
 
@@ -18,7 +17,6 @@ app.get("/api/_bindings", (c) =>
 	})
 );
 
-app.route("/api/user", userRoutes);
 // `GET /api/room` lists public rooms (lobby), `POST /api/room` creates
 // one, `GET /api/room/:code/ws` upgrades to the room's WebSocket.
 app.route("/api/room", roomRoutes);

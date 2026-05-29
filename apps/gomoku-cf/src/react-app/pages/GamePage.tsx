@@ -4,33 +4,28 @@ import { LobbyWidget } from "../components/LobbyWidget";
 import { PlayerList, paletteForPlayers } from "../components/PlayerList";
 import { RoomWidget } from "../components/RoomWidget";
 import { SignInCard } from "../components/SignInCard";
-import type { Identity } from "../hooks/useIdentity";
 import { useMultiPlayerGame } from "../hooks/useMultiPlayerGame";
+import { getPreferredName, useRoomSeat } from "../hooks/useRoomSeat";
 import type { Poem, RoomVisibility } from "../../shared/protocol";
 
 interface Props {
-	identity: Identity | null;
 	roomCode: string;
 	busy: boolean;
 	onCreateRoom: (visibility: RoomVisibility) => void;
 	onJoinRoom: (code: string) => void;
-	onRandomSignIn: () => Promise<void>;
-	onCustomSignIn: (name: string) => Promise<void>;
 	/** Surfaces the latest clear-event poem (room-scoped) up to App so
 	    it can be typewritten in the page header without blocking play. */
 	onPoem: (poem: Poem) => void;
 }
 
 export function GamePage({
-	identity,
 	roomCode,
 	busy,
 	onCreateRoom,
 	onJoinRoom,
-	onRandomSignIn,
-	onCustomSignIn,
 	onPoem,
 }: Props) {
+	const { seat, take, clear } = useRoomSeat(roomCode);
 	const {
 		connection,
 		state,
@@ -39,15 +34,14 @@ export function GamePage({
 		lastClear,
 		lastTimeout,
 		errorMsg,
+		seatRejection,
 		place,
 		restart,
-	} = useMultiPlayerGame({
-		roomCode,
-		username: identity?.username ?? null,
-		token: identity?.token ?? null,
-	});
+		leaveSeat,
+	} = useMultiPlayerGame({ roomCode, seat });
 
 	const [signInHintAt, setSignInHintAt] = useState(0);
+	const [signInError, setSignInError] = useState<string | null>(null);
 
 	// Every new lastClear with a poem fires the header swap. The key is
 	// lastClear.id so a re-render without a new event doesn't re-trigger.
@@ -55,12 +49,34 @@ export function GamePage({
 		if (lastClear?.poem) onPoem(lastClear.poem);
 	}, [lastClear?.id, lastClear?.poem, onPoem]);
 
+	// A rejected seat (name taken in this room, room full…) drops us back
+	// to spectator and shows the reason in the sign-in card.
+	useEffect(() => {
+		if (seatRejection) {
+			setSignInError(seatRejection.message);
+			clear();
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [seatRejection?.id]);
+
+	const me = seat?.username ?? "";
+
 	const handlePlace = (row: number, col: number) => {
 		if (isSpectator) {
 			setSignInHintAt(Date.now());
 			return;
 		}
 		place(row, col);
+	};
+
+	const pickSeat = (name: string) => {
+		setSignInError(null);
+		take(name);
+	};
+
+	const leave = () => {
+		leaveSeat();
+		clear();
 	};
 
 	const turnLabel = !state ? (
@@ -126,7 +142,11 @@ export function GamePage({
 			{/* Right sidebar */}
 			<aside className="space-y-3 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto lg:pr-1">
 				{isSpectator ? (
-					<SignInCard onRandom={onRandomSignIn} onCustom={onCustomSignIn} />
+					<SignInCard
+						defaultName={getPreferredName()}
+						error={signInError}
+						onPick={pickSeat}
+					/>
 				) : (
 					<RoomWidget
 						roomCode={roomCode}
@@ -139,7 +159,7 @@ export function GamePage({
 					/>
 				)}
 
-				{isSpectator && (
+				{isSpectator ? (
 					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3 text-xs text-stone-400">
 						房间 <span className="font-mono tracking-widest text-stone-200">{roomCode}</span>
 						{state?.visibility && (
@@ -147,6 +167,20 @@ export function GamePage({
 								{state.visibility === "public" ? "公开" : "私人"}
 							</span>
 						)}
+					</section>
+				) : (
+					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3 flex items-center justify-between gap-2 text-sm">
+						<span className="text-stone-300 truncate">
+							你 · <span className="text-emerald-300 font-medium">{me}</span>
+						</span>
+						<button
+							type="button"
+							onClick={leave}
+							className="text-stone-500 hover:text-stone-300 text-xs shrink-0 transition-colors"
+							title="放弃座位,改用其他名字"
+						>
+							退出席位
+						</button>
 					</section>
 				)}
 
@@ -158,7 +192,7 @@ export function GamePage({
 						<PlayerList
 							players={state.players}
 							turn={state.turn}
-							me={identity?.username ?? ""}
+							me={me}
 						/>
 					</section>
 				)}
@@ -166,7 +200,7 @@ export function GamePage({
 				<LobbyWidget currentRoom={roomCode} onJoinRoom={onJoinRoom} />
 			</aside>
 
-			<ClearBanner event={lastClear} me={identity?.username ?? ""} />
+			<ClearBanner event={lastClear} me={me} />
 			<TimeoutBanner event={lastTimeout} />
 			<ErrorBanner message={errorMsg} />
 			<SignInHint key={signInHintAt} visible={signInHintAt > 0} />

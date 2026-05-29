@@ -1,6 +1,4 @@
 import type {
-	ClaimRequest,
-	ClaimResponse,
 	CreateRoomRequest,
 	CreateRoomResponse,
 	ListRoomsResponse,
@@ -44,9 +42,6 @@ function get<T>(path: string): Promise<T> {
 }
 
 export const api = {
-	claim(req: ClaimRequest) {
-		return post<ClaimResponse>("/api/user/claim", req);
-	},
 	createRoom(req: CreateRoomRequest) {
 		return post<CreateRoomResponse>("/api/room", req);
 	},
