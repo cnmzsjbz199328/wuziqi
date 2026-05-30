@@ -57,7 +57,12 @@ interface Options {
 	seat: Seat | null;
 }
 
-const RECONNECT_MS = 2000;
+// Reconnect schedule: try fast on the first blip (mobile WS drops are
+// frequent and usually transient), then double the delay on each
+// successive failure to avoid hammering during a real outage. Reset to
+// the base delay every time a connection successfully opens.
+const RECONNECT_BASE_MS = 300;
+const RECONNECT_MAX_MS = 5000;
 // Error codes that mean "your seat attempt was refused" rather than a
 // transient gameplay error — surfaced separately so the UI can re-prompt.
 const SEAT_REJECT_CODES = new Set([
@@ -82,6 +87,8 @@ export function useMultiPlayerGame({ roomCode, seat }: Options) {
 	// did. Stored in a ref so a new state push doesn't blow it away.
 	const lastMoveRef = useRef<RoomState["lastMove"]>(null);
 	const cancelledRef = useRef(false);
+	// Backoff state for the reconnect schedule — see RECONNECT_*_MS above.
+	const reconnectDelayRef = useRef(RECONNECT_BASE_MS);
 	// Latest seat, read inside ws.onopen (a closure created at connect time).
 	const seatRef = useRef<Seat | null>(seat);
 	seatRef.current = seat;
@@ -108,6 +115,9 @@ export function useMultiPlayerGame({ roomCode, seat }: Options) {
 
 		ws.onopen = () => {
 			setConnection("open");
+			// Successful connect resets the backoff so the next blip
+			// reconnects fast again.
+			reconnectDelayRef.current = RECONNECT_BASE_MS;
 			// Reclaim (or take) our seat if we have one.
 			sendJoin();
 		};
@@ -177,7 +187,9 @@ export function useMultiPlayerGame({ roomCode, seat }: Options) {
 			setConnection("closed");
 			wsRef.current = null;
 			if (cancelledRef.current) return;
-			reconnectTimerRef.current = window.setTimeout(connect, RECONNECT_MS);
+			const delay = reconnectDelayRef.current;
+			reconnectDelayRef.current = Math.min(delay * 2, RECONNECT_MAX_MS);
+			reconnectTimerRef.current = window.setTimeout(connect, delay);
 		};
 
 		ws.onerror = () => {
