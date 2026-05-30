@@ -141,34 +141,29 @@ export function GamePage({
 
 			{/* Right sidebar */}
 			<aside className="space-y-3 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto lg:pr-1">
-				{isSpectator ? (
+				{isSpectator && (
 					<SignInCard
 						defaultName={getPreferredName()}
 						error={signInError}
 						onPick={pickSeat}
 					/>
-				) : (
-					<RoomWidget
-						roomCode={roomCode}
-						visibility={state?.visibility ?? null}
-						connection={connection}
-						busy={busy}
-						onCreateRoom={onCreateRoom}
-						onJoinRoom={onJoinRoom}
-						onRestart={restart}
-					/>
 				)}
 
-				{isSpectator ? (
-					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3 text-xs text-stone-400">
-						房间 <span className="font-mono tracking-widest text-stone-200">{roomCode}</span>
-						{state?.visibility && (
-							<span className={`ml-2 px-1.5 py-0.5 rounded ${state.visibility === "public" ? "bg-emerald-900/60 text-emerald-300" : "bg-indigo-900/60 text-indigo-300"}`}>
-								{state.visibility === "public" ? "公开" : "私人"}
-							</span>
-						)}
-					</section>
-				) : (
+				{/* Room controls (create / join / restart) are navigation,
+				    not gameplay — spectators get them too so they can spin
+				    up their own room or hop to another. Restart stays
+				    seated-only via the optional onRestart prop. */}
+				<RoomWidget
+					roomCode={roomCode}
+					visibility={state?.visibility ?? null}
+					connection={connection}
+					busy={busy}
+					onCreateRoom={onCreateRoom}
+					onJoinRoom={onJoinRoom}
+					onRestart={isSpectator ? undefined : restart}
+				/>
+
+				{!isSpectator && (
 					<section className="bg-stone-800/40 border border-stone-700 rounded-lg p-3 flex items-center justify-between gap-2 text-sm">
 						<span className="text-stone-300 truncate">
 							你 · <span className="text-emerald-300 font-medium">{me}</span>

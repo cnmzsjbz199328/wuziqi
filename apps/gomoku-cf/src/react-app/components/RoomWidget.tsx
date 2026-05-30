@@ -11,9 +11,11 @@ interface Props {
 	busy: boolean;
 	onCreateRoom: (visibility: RoomVisibility) => void;
 	onJoinRoom: (code: string) => void;
-	/** Resets the board + every player's per-room score to 0. The only
-	    way scores zero out — there's no auto-end-round any more. */
-	onRestart: () => void;
+	/** Resets the board + every player's per-room score to 0. Omitted
+	    for spectators — only seated players can restart (the server
+	    rejects it for spectators anyway), so the UI hides the affordance
+	    rather than showing a button that errors. */
+	onRestart?: () => void;
 }
 
 export function RoomWidget({
@@ -38,7 +40,7 @@ export function RoomWidget({
 	const confirmAndRestart = () => {
 		if (confirmTimerRef.current !== null) window.clearTimeout(confirmTimerRef.current);
 		setConfirmRestart(false);
-		onRestart();
+		onRestart?.();
 	};
 	useEffect(() => () => {
 		if (confirmTimerRef.current !== null) window.clearTimeout(confirmTimerRef.current);
@@ -126,33 +128,35 @@ export function RoomWidget({
 				<p className="text-red-400 text-xs">{codeError}</p>
 			)}
 
-			{confirmRestart ? (
-				<div className="flex items-center gap-2">
-					<span className="text-amber-400 text-xs flex-1">确定要重开？</span>
+			{onRestart && (
+				confirmRestart ? (
+					<div className="flex items-center gap-2">
+						<span className="text-amber-400 text-xs flex-1">确定要重开？</span>
+						<button
+							type="button"
+							onClick={confirmAndRestart}
+							className="text-xs px-2 py-1 rounded bg-amber-700 hover:bg-amber-600 text-amber-50 transition-colors"
+						>
+							确定
+						</button>
+						<button
+							type="button"
+							onClick={() => setConfirmRestart(false)}
+							className="text-xs px-2 py-1 rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
+						>
+							取消
+						</button>
+					</div>
+				) : (
 					<button
 						type="button"
-						onClick={confirmAndRestart}
-						className="text-xs px-2 py-1 rounded bg-amber-700 hover:bg-amber-600 text-amber-50 transition-colors"
+						onClick={requestRestart}
+						className="w-full text-stone-500 hover:text-stone-300 text-xs py-1 transition-colors"
+						title="清空棋盘并把所有人的本房分数归零"
 					>
-						确定
+						重开本房间棋局
 					</button>
-					<button
-						type="button"
-						onClick={() => setConfirmRestart(false)}
-						className="text-xs px-2 py-1 rounded bg-stone-700 hover:bg-stone-600 text-stone-200 transition-colors"
-					>
-						取消
-					</button>
-				</div>
-			) : (
-				<button
-					type="button"
-					onClick={requestRestart}
-					className="w-full text-stone-500 hover:text-stone-300 text-xs py-1 transition-colors"
-					title="清空棋盘并把所有人的本房分数归零"
-				>
-					重开本房间棋局
-				</button>
+				)
 			)}
 		</section>
 	);
