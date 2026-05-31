@@ -124,7 +124,7 @@ function App() {
 			{appError && (
 				<div
 					role="alert"
-					className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded bg-red-950/90 border border-red-800 text-red-100 text-sm"
+					className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-4 py-2 rounded bg-red-950/90 border border-red-800 text-red-100 text-sm"
 				>
 					{appError === "bootstrap_failed"
 						? "进入房间失败,刷新重试"

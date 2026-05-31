@@ -215,10 +215,10 @@ function SignInHint({ visible }: { visible: boolean }) {
 	return (
 		<div
 			role="status"
-			className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-lg shadow-lg border bg-emerald-900/90 border-emerald-700 text-emerald-50 text-sm text-center"
+			className="fixed top-20 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-5 py-3 rounded-lg shadow-lg border bg-emerald-900/90 border-emerald-700 text-emerald-50 text-sm text-center"
 		>
 			<div className="font-medium">想下子?</div>
-			<div className="opacity-90 mt-0.5">右侧"取个名字"登记后即可</div>
+			<div className="opacity-90 mt-0.5">请先取个名字加入本盘</div>
 		</div>
 	);
 }
@@ -249,7 +249,7 @@ function ClearBanner({
 	return (
 		<div
 			role="status"
-			className={`fixed top-20 left-1/2 -translate-x-1/2 z-40 px-5 py-3 rounded-lg shadow-lg border text-sm text-center ${
+			className={`fixed top-20 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-5 py-3 rounded-lg shadow-lg border text-sm text-center ${
 				mine
 					? "bg-emerald-900/90 border-emerald-700 text-emerald-100"
 					: "bg-stone-800/95 border-stone-600 text-stone-100"
@@ -283,7 +283,7 @@ function TimeoutBanner({
 	return (
 		<div
 			role="status"
-			className="fixed top-20 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded bg-amber-900/90 border border-amber-700 text-amber-100 text-sm"
+			className="fixed top-20 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-4 py-2 rounded bg-amber-900/90 border border-amber-700 text-amber-100 text-sm"
 		>
 			{event.username} 超时,跳过
 		</div>
@@ -301,7 +301,7 @@ function ErrorBanner({ message }: { message: string | null }) {
 	return (
 		<div
 			role="alert"
-			className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded bg-red-950/90 border border-red-800 text-red-100 text-sm"
+			className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-4 py-2 rounded bg-red-950/90 border border-red-800 text-red-100 text-sm"
 		>
 			{message}
 		</div>
