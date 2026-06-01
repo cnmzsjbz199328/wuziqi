@@ -196,7 +196,6 @@ export function GamePage({
 				<LobbyWidget currentRoom={roomCode} onJoinRoom={onJoinRoom} />
 			</aside>
 
-			<ClearBanner event={lastClear} me={me} />
 			<TimeoutBanner event={lastTimeout} />
 			<ErrorBanner message={errorMsg} />
 			<SignInHint key={signInHintAt} visible={signInHintAt > 0} />
@@ -228,43 +227,6 @@ function BoardSkeleton() {
 	return (
 		<div className="aspect-square bg-stone-800/50 border border-stone-700 rounded-lg animate-pulse flex items-center justify-center text-stone-500 text-sm">
 			棋盘准备中…
-		</div>
-	);
-}
-
-function ClearBanner({
-	event,
-	me,
-}: {
-	event: { id: number; by: string; clearedSelf: number; pointsAwarded: number } | null;
-	me: string;
-}) {
-	const [dismissedId, setDismissedId] = useState<number | null>(null);
-	useEffect(() => {
-		if (!event) return;
-		const h = window.setTimeout(() => setDismissedId(event.id), 4000);
-		return () => window.clearTimeout(h);
-	}, [event]);
-	if (!event || event.id === dismissedId) return null;
-	const mine = event.by === me;
-	return (
-		<div
-			role="status"
-			className={`fixed top-20 left-1/2 -translate-x-1/2 z-40 max-w-[calc(100vw-2rem)] px-5 py-3 rounded-lg shadow-lg border text-sm text-center ${
-				mine
-					? "bg-emerald-900/90 border-emerald-700 text-emerald-100"
-					: "bg-stone-800/95 border-stone-600 text-stone-100"
-			}`}
-		>
-			<div className="font-medium">
-				{mine ? "五连!" : `${event.by} 五连`}
-			</div>
-			<div className="opacity-90">
-				清除 {event.clearedSelf} 子
-				{mine && event.pointsAwarded > 0 && (
-					<> · +{event.pointsAwarded} 分</>
-				)}
-			</div>
 		</div>
 	);
 }

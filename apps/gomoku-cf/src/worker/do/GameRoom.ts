@@ -54,9 +54,16 @@ const HUMAN_COLORS: PlayerColor[] = ["black", "white", "red", "blue"];
 const BOT_COLOR: PlayerColor = "amber";
 
 // Bot's "thinking" delay before its alarm-driven move lands. Long
-// enough that the previous move + any clear-and-disrupt animation has
-// time to register visually before stones start moving again.
+// enough that the previous move registers visually before the bot
+// plays. The longer post-clear figure below is used after a 5-in-a-row.
 const BOT_THINK_MS = 1500;
+
+// Extra "settle" delay used when the previous move triggered a clear,
+// to keep the bot from slamming down a stone while the winning-pulse
+// (~2.2s on the client) and stone-fall animation (~1.8s) are still
+// playing. Tuned to match the client's animation budget + a small
+// network breath.
+const POST_CLEAR_BOT_DELAY_MS = 4200;
 
 // Connected-human turn budget. Only enforced when 2+ humans are in
 // the room (see rescheduleAlarm) — solo-human-vs-bot rooms have no
@@ -349,10 +356,12 @@ export class GameRoom extends DurableObject<Env> {
 			return;
 		}
 		let nextBoard = placed.board;
+		let triggeredClear = false;
 
 		this.broadcast({ type: "move", row, col, by: username });
 
 		if (hasFiveInARow(nextBoard, username)) {
+			triggeredClear = true;
 			const result = clearWinningLines(nextBoard, username);
 			nextBoard = result.board;
 			const pointsAwarded = scoreForClear(result.clearedSelf);
@@ -376,7 +385,11 @@ export class GameRoom extends DurableObject<Env> {
 		await this.storage().put("board", nextBoard);
 		await this.advanceTurn();
 		await this.broadcastState();
-		await this.rescheduleAlarm();
+		// On a clear the client runs ~4s of winning-pulse + stone-fall;
+		// hold the bot back so it doesn't move on top of the animation.
+		await this.rescheduleAlarm(
+			triggeredClear ? POST_CLEAR_BOT_DELAY_MS : undefined
+		);
 	}
 
 	private async restartRound(): Promise<void> {
@@ -407,7 +420,7 @@ export class GameRoom extends DurableObject<Env> {
 	 *   - Anything else (status != playing, etc.) → no alarm
 	 * Called after every state mutation that could shift this decision.
 	 */
-	private async rescheduleAlarm(): Promise<void> {
+	private async rescheduleAlarm(botDelayMs?: number): Promise<void> {
 		const status =
 			(await this.storage().get<GameStatus>("status")) ?? "waiting";
 		const connectedHumanCount = this.countConnectedHumans();
@@ -427,7 +440,9 @@ export class GameRoom extends DurableObject<Env> {
 		const turn = (await this.storage().get<string>("turn")) ?? null;
 		if (turn === BOT_USERNAME) {
 			await this.storage().put("alarm_reason", "bot_move" satisfies AlarmReason);
-			await this.ctx.storage.setAlarm(Date.now() + BOT_THINK_MS);
+			await this.ctx.storage.setAlarm(
+				Date.now() + (botDelayMs ?? BOT_THINK_MS)
+			);
 			return;
 		}
 		if (turn && connectedHumanCount >= 2) {
