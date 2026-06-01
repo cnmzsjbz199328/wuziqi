@@ -64,58 +64,12 @@ interface Props {
 	winningPositions?: { row: number; col: number }[];
 }
 
-interface WinningSegment {
-	from: { row: number; col: number };
-	to: { row: number; col: number };
-}
-
 function xy(idx: number): number {
 	return PAD + idx * CELL;
 }
 
 function labelFor(marker: string): string {
 	return marker.charAt(0).toUpperCase();
-}
-
-function inkDotOffsets(row: number, col: number) {
-	const seed = (row * 37 + col * 19) % 11;
-	return [
-		{ dx: -7 + (seed % 3), dy: -5, r: 2.2 },
-		{ dx: 8, dy: -3 + (seed % 4), r: 1.7 },
-		{ dx: -3, dy: 8 - (seed % 3), r: 1.5 },
-	];
-}
-
-function winningSegments(
-	positions: { row: number; col: number }[] | undefined
-): WinningSegment[] {
-	if (!positions || positions.length < 2) return [];
-	const set = new Set(positions.map((p) => `${p.row},${p.col}`));
-	const dirs = [
-		[0, 1],
-		[1, 0],
-		[1, 1],
-		[1, -1],
-	] as const;
-	const segments: WinningSegment[] = [];
-
-	for (const pos of positions) {
-		for (const [dr, dc] of dirs) {
-			if (set.has(`${pos.row - dr},${pos.col - dc}`)) continue;
-			let len = 0;
-			while (set.has(`${pos.row + len * dr},${pos.col + len * dc}`)) len++;
-			if (len < 5) continue;
-			segments.push({
-				from: pos,
-				to: {
-					row: pos.row + (len - 1) * dr,
-					col: pos.col + (len - 1) * dc,
-				},
-			});
-		}
-	}
-
-	return segments;
 }
 
 export function Board({
@@ -130,24 +84,14 @@ export function Board({
 	const styleFor = (marker: string): StoneStyle =>
 		palette[marker] ?? FALLBACK_STYLE;
 
-	// Track active winning positions to manage their lifecycle self-contained.
-	// This lets them show during the clear-buffer delay and then fade out beautifully
-	// without leaving permanent ink wash/lines on the board.
-	const [activeWinningPositions, setActiveWinningPositions] = useState<{ row: number; col: number }[] | undefined>(undefined);
-
-	useEffect(() => {
-		if (winningPositions && winningPositions.length > 0) {
-			setActiveWinningPositions(winningPositions);
-			const timer = window.setTimeout(() => {
-				setActiveWinningPositions(undefined);
-			}, 3500); // Matches the 3.5s animation duration
-			return () => window.clearTimeout(timer);
-		} else {
-			setActiveWinningPositions(undefined);
-		}
-	}, [winningPositions]);
-
-	const winSegments = winningSegments(activeWinningPositions);
+	// Quick lookup so the per-stone render can apply a "winning" pulse
+	// highlight to each cell that was part of the most recent 5-in-a-row.
+	// The hook buffers the post-clear `state` for ~2.2s, so the highlight
+	// is visible while the stones are still on the board, before they
+	// tremble and fall.
+	const winningSet = new Set(
+		(winningPositions ?? []).map((p) => `${p.row},${p.col}`)
+	);
 
 	// Diff the board against its previous value to detect removed stones,
 	// then animate them out. Removals only ever happen on a clear event,
@@ -237,11 +181,6 @@ export function Board({
 					<stop offset="62%" stopColor="#d7aa5b" />
 					<stop offset="100%" stopColor="#b8833c" />
 				</radialGradient>
-				<radialGradient id="last-move-wash" cx="50%" cy="50%" r="50%">
-					<stop offset="0%" stopColor="#1f2937" stopOpacity="0.28" />
-					<stop offset="70%" stopColor="#1f2937" stopOpacity="0.08" />
-					<stop offset="100%" stopColor="#1f2937" stopOpacity="0" />
-				</radialGradient>
 			</defs>
 
 			<rect width={SIZE} height={SIZE} fill="url(#paper-wash)" />
@@ -293,73 +232,44 @@ export function Board({
 				/>
 			))}
 
-			{winSegments.map((seg, i) => (
-				<g key={`win-line-${i}`} className="winning-ink-line">
+			{/* Cross pulse — emanates from the just-placed stone in the
+			    player's own color along the full row and column. Keyed
+			    by (row,col) so a new move remounts the lines and the
+			    one-shot CSS animation fires fresh each placement. */}
+			{lastMove && board[lastMove.row]?.[lastMove.col] && (
+				<g key={`pulse-${lastMove.row}-${lastMove.col}`}>
 					<line
-						className="winning-ink-aura"
-						x1={xy(seg.from.col)}
-						y1={xy(seg.from.row)}
-						x2={xy(seg.to.col)}
-						y2={xy(seg.to.row)}
+						className="cross-pulse-line"
+						x1={xy(0)}
+						y1={xy(lastMove.row)}
+						x2={xy(BOARD_SIZE - 1)}
+						y2={xy(lastMove.row)}
+						stroke={styleFor(board[lastMove.row][lastMove.col] as string).fill}
 					/>
 					<line
-						className="winning-ink-stroke"
-						x1={xy(seg.from.col)}
-						y1={xy(seg.from.row)}
-						x2={xy(seg.to.col)}
-						y2={xy(seg.to.row)}
-						filter="url(#ink-waver)"
+						className="cross-pulse-line"
+						x1={xy(lastMove.col)}
+						y1={xy(0)}
+						x2={xy(lastMove.col)}
+						y2={xy(BOARD_SIZE - 1)}
+						stroke={styleFor(board[lastMove.row][lastMove.col] as string).fill}
 					/>
 				</g>
-			))}
+			)}
 
-			{activeWinningPositions?.map((pos, i) => (
-				<g key={`win-${pos.row}-${pos.col}-${i}`} className="winning-ink-ring">
-					<circle
-						cx={xy(pos.col)}
-						cy={xy(pos.row)}
-						r={STONE_R + 7}
-						fill="none"
-						stroke="#1f1710"
-						strokeWidth={2.8}
-						opacity={0.5}
-						filter="url(#ink-waver)"
-					/>
-				</g>
-			))}
-
-			{/* Live stones */}
+			{/* Live stones. No per-stone SVG filter (the old ink-soften
+			    Gaussian blur was the biggest render hog on full boards).
+			    Stones in the winning set get the breathing pulse class. */}
 			{board.flatMap((row, r) =>
 				row.map((cell, c) => {
 					if (!cell) return null;
 					const s = styleFor(cell);
-					const isLast =
-						lastMove && lastMove.row === r && lastMove.col === c;
+					const isWinning = winningSet.has(`${r},${c}`);
 					return (
 						<g
 							key={`stone-${r}-${c}`}
-							className={isLast ? "ink-stone ink-stone-new" : "ink-stone"}
-							filter="url(#ink-soften)"
+							className={isWinning ? "stone-winning" : undefined}
 						>
-							{isLast && (
-								<circle
-									className="stone-ink-bloom"
-									cx={xy(c)}
-									cy={xy(r)}
-									r={STONE_R + 12}
-									fill="url(#last-move-wash)"
-								/>
-							)}
-							{inkDotOffsets(r, c).map((dot, i) => (
-								<circle
-									key={`dot-${i}`}
-									cx={xy(c) + dot.dx}
-									cy={xy(r) + dot.dy}
-									r={dot.r}
-									fill={s.fill}
-									opacity={0.26}
-								/>
-							))}
 							<circle
 								cx={xy(c)}
 								cy={xy(r)}
@@ -380,18 +290,6 @@ export function Board({
 							>
 								{labelFor(cell)}
 							</text>
-							{isLast && (
-								<circle
-									className="last-move-ink"
-									cx={xy(c)}
-									cy={xy(r)}
-									r={STONE_R + 5}
-									fill="none"
-									stroke="#20160f"
-									strokeWidth={2.2}
-									filter="url(#ink-waver)"
-								/>
-							)}
 						</g>
 					);
 				})
@@ -401,21 +299,10 @@ export function Board({
 			{exiting.map((s) => (
 				<g
 					key={`exit-${s.id}`}
-					className={`stone-exit ink-stone ${
+					className={`stone-exit ${
 						s.kind === "fall" ? "stone-exit-fall" : "stone-exit-shatter"
 					}`}
-					filter="url(#ink-soften)"
 				>
-					{inkDotOffsets(s.row, s.col).map((dot, i) => (
-						<circle
-							key={`exit-dot-${i}`}
-							cx={xy(s.col) + dot.dx}
-							cy={xy(s.row) + dot.dy}
-							r={dot.r}
-							fill={s.style.fill}
-							opacity={0.26}
-						/>
-					))}
 					<circle
 						cx={xy(s.col)}
 						cy={xy(s.row)}

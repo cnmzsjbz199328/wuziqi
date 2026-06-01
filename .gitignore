@@ -4,3 +4,6 @@
 node_modules/
 *.log
 .DS_Store
+
+# Local editor / tool artifacts (Antigravity CLI, Gemini config, etc).
+.antigravitycli/
