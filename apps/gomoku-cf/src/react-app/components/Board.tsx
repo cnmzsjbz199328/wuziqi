@@ -64,12 +64,58 @@ interface Props {
 	winningPositions?: { row: number; col: number }[];
 }
 
+interface WinningSegment {
+	from: { row: number; col: number };
+	to: { row: number; col: number };
+}
+
 function xy(idx: number): number {
 	return PAD + idx * CELL;
 }
 
 function labelFor(marker: string): string {
 	return marker.charAt(0).toUpperCase();
+}
+
+function inkDotOffsets(row: number, col: number) {
+	const seed = (row * 37 + col * 19) % 11;
+	return [
+		{ dx: -7 + (seed % 3), dy: -5, r: 2.2 },
+		{ dx: 8, dy: -3 + (seed % 4), r: 1.7 },
+		{ dx: -3, dy: 8 - (seed % 3), r: 1.5 },
+	];
+}
+
+function winningSegments(
+	positions: { row: number; col: number }[] | undefined
+): WinningSegment[] {
+	if (!positions || positions.length < 2) return [];
+	const set = new Set(positions.map((p) => `${p.row},${p.col}`));
+	const dirs = [
+		[0, 1],
+		[1, 0],
+		[1, 1],
+		[1, -1],
+	] as const;
+	const segments: WinningSegment[] = [];
+
+	for (const pos of positions) {
+		for (const [dr, dc] of dirs) {
+			if (set.has(`${pos.row - dr},${pos.col - dc}`)) continue;
+			let len = 0;
+			while (set.has(`${pos.row + len * dr},${pos.col + len * dc}`)) len++;
+			if (len < 5) continue;
+			segments.push({
+				from: pos,
+				to: {
+					row: pos.row + (len - 1) * dr,
+					col: pos.col + (len - 1) * dc,
+				},
+			});
+		}
+	}
+
+	return segments;
 }
 
 export function Board({
@@ -83,6 +129,25 @@ export function Board({
 }: Props) {
 	const styleFor = (marker: string): StoneStyle =>
 		palette[marker] ?? FALLBACK_STYLE;
+
+	// Track active winning positions to manage their lifecycle self-contained.
+	// This lets them show during the clear-buffer delay and then fade out beautifully
+	// without leaving permanent ink wash/lines on the board.
+	const [activeWinningPositions, setActiveWinningPositions] = useState<{ row: number; col: number }[] | undefined>(undefined);
+
+	useEffect(() => {
+		if (winningPositions && winningPositions.length > 0) {
+			setActiveWinningPositions(winningPositions);
+			const timer = window.setTimeout(() => {
+				setActiveWinningPositions(undefined);
+			}, 3500); // Matches the 3.5s animation duration
+			return () => window.clearTimeout(timer);
+		} else {
+			setActiveWinningPositions(undefined);
+		}
+	}, [winningPositions]);
+
+	const winSegments = winningSegments(activeWinningPositions);
 
 	// Diff the board against its previous value to detect removed stones,
 	// then animate them out. Removals only ever happen on a clear event,
@@ -134,37 +199,136 @@ export function Board({
 			role="grid"
 			aria-label="五子棋棋盘"
 		>
-			<rect width={SIZE} height={SIZE} fill="#dcb35c" />
+			<defs>
+				<filter id="paper-grain" x="-6%" y="-6%" width="112%" height="112%">
+					<feTurbulence
+						type="fractalNoise"
+						baseFrequency="0.018 0.09"
+						numOctaves={4}
+						seed={12}
+						result="grain"
+					/>
+					<feColorMatrix
+						in="grain"
+						type="matrix"
+						values="0 0 0 0 0.83 0 0 0 0 0.74 0 0 0 0 0.55 0 0 0 0.18 0"
+					/>
+				</filter>
+				<filter id="ink-waver" x="-8%" y="-8%" width="116%" height="116%">
+					<feTurbulence
+						type="fractalNoise"
+						baseFrequency="0.045"
+						numOctaves={2}
+						seed={8}
+						result="rough"
+					/>
+					<feDisplacementMap in="SourceGraphic" in2="rough" scale={1.8} />
+				</filter>
+				<filter id="ink-soften" x="-40%" y="-40%" width="180%" height="180%">
+					<feGaussianBlur in="SourceAlpha" stdDeviation={1.2} result="blur" />
+					<feOffset in="blur" dx={0.4} dy={0.8} result="shadow" />
+					<feMerge>
+						<feMergeNode in="shadow" />
+						<feMergeNode in="SourceGraphic" />
+					</feMerge>
+				</filter>
+				<radialGradient id="paper-wash" cx="42%" cy="35%" r="78%">
+					<stop offset="0%" stopColor="#f2dfad" />
+					<stop offset="62%" stopColor="#d7aa5b" />
+					<stop offset="100%" stopColor="#b8833c" />
+				</radialGradient>
+				<radialGradient id="last-move-wash" cx="50%" cy="50%" r="50%">
+					<stop offset="0%" stopColor="#1f2937" stopOpacity="0.28" />
+					<stop offset="70%" stopColor="#1f2937" stopOpacity="0.08" />
+					<stop offset="100%" stopColor="#1f2937" stopOpacity="0" />
+				</radialGradient>
+			</defs>
+
+			<rect width={SIZE} height={SIZE} fill="url(#paper-wash)" />
+			<rect width={SIZE} height={SIZE} filter="url(#paper-grain)" opacity={0.8} />
+			<path
+				d={`M ${PAD * 0.55} ${PAD * 0.55} C ${SIZE * 0.2} ${PAD * 0.25}, ${SIZE * 0.8} ${PAD * 0.8}, ${SIZE - PAD * 0.55} ${PAD * 0.5}
+					L ${SIZE - PAD * 0.45} ${SIZE - PAD * 0.65}
+					C ${SIZE * 0.72} ${SIZE - PAD * 0.25}, ${SIZE * 0.18} ${SIZE - PAD * 0.75}, ${PAD * 0.55} ${SIZE - PAD * 0.5}
+					Z`}
+				fill="none"
+				stroke="#2f2419"
+				strokeWidth={2.2}
+				opacity={0.24}
+				filter="url(#ink-waver)"
+			/>
 
 			{Array.from({ length: BOARD_SIZE }).map((_, i) => (
-				<g key={i} stroke="#3a2718" strokeWidth={1.2}>
-					<line x1={xy(0)} y1={xy(i)} x2={xy(BOARD_SIZE - 1)} y2={xy(i)} />
-					<line x1={xy(i)} y1={xy(0)} x2={xy(i)} y2={xy(BOARD_SIZE - 1)} />
+				<g
+					key={i}
+					className="ink-grid-line"
+					stroke="#2b1c12"
+					strokeWidth={1.35}
+					filter="url(#ink-waver)"
+				>
+					<line
+						x1={xy(0)}
+						y1={xy(i) + (i % 2 ? 0.25 : -0.15)}
+						x2={xy(BOARD_SIZE - 1)}
+						y2={xy(i) + (i % 3 ? -0.1 : 0.2)}
+					/>
+					<line
+						x1={xy(i) + (i % 2 ? -0.15 : 0.2)}
+						y1={xy(0)}
+						x2={xy(i) + (i % 3 ? 0.15 : -0.2)}
+						y2={xy(BOARD_SIZE - 1)}
+					/>
 				</g>
 			))}
 
 			{STAR_POINTS.map(([r, c]) => (
-				<circle key={`star-${r}-${c}`} cx={xy(c)} cy={xy(r)} r={3.5} fill="#3a2718" />
+				<circle
+					key={`star-${r}-${c}`}
+					cx={xy(c)}
+					cy={xy(r)}
+					r={4.2}
+					fill="#23170f"
+					opacity={0.76}
+					filter="url(#ink-soften)"
+				/>
+			))}
+
+			{winSegments.map((seg, i) => (
+				<g key={`win-line-${i}`} className="winning-ink-line">
+					<line
+						className="winning-ink-aura"
+						x1={xy(seg.from.col)}
+						y1={xy(seg.from.row)}
+						x2={xy(seg.to.col)}
+						y2={xy(seg.to.row)}
+					/>
+					<line
+						className="winning-ink-stroke"
+						x1={xy(seg.from.col)}
+						y1={xy(seg.from.row)}
+						x2={xy(seg.to.col)}
+						y2={xy(seg.to.row)}
+						filter="url(#ink-waver)"
+					/>
+				</g>
+			))}
+
+			{activeWinningPositions?.map((pos, i) => (
+				<g key={`win-${pos.row}-${pos.col}-${i}`} className="winning-ink-ring">
+					<circle
+						cx={xy(pos.col)}
+						cy={xy(pos.row)}
+						r={STONE_R + 7}
+						fill="none"
+						stroke="#1f1710"
+						strokeWidth={2.8}
+						opacity={0.5}
+						filter="url(#ink-waver)"
+					/>
+				</g>
 			))}
 
 			{/* Live stones */}
-			{/* Highlight winning positions (pre-clear) */}
-			{winningPositions?.map((pos, i) => {
-				if (!board[pos.row]?.[pos.col]) return null;
-				return (
-					<g key={`win-${pos.row}-${pos.col}-${i}`}>
-						<circle
-							cx={xy(pos.col)}
-							cy={xy(pos.row)}
-							r={STONE_R + 6}
-							fill="none"
-							stroke="#ffd166"
-							strokeWidth={3}
-							opacity={0.95}
-						/>
-					</g>
-				);
-			})}
 			{board.flatMap((row, r) =>
 				row.map((cell, c) => {
 					if (!cell) return null;
@@ -172,7 +336,30 @@ export function Board({
 					const isLast =
 						lastMove && lastMove.row === r && lastMove.col === c;
 					return (
-						<g key={`stone-${r}-${c}`}>
+						<g
+							key={`stone-${r}-${c}`}
+							className={isLast ? "ink-stone ink-stone-new" : "ink-stone"}
+							filter="url(#ink-soften)"
+						>
+							{isLast && (
+								<circle
+									className="stone-ink-bloom"
+									cx={xy(c)}
+									cy={xy(r)}
+									r={STONE_R + 12}
+									fill="url(#last-move-wash)"
+								/>
+							)}
+							{inkDotOffsets(r, c).map((dot, i) => (
+								<circle
+									key={`dot-${i}`}
+									cx={xy(c) + dot.dx}
+									cy={xy(r) + dot.dy}
+									r={dot.r}
+									fill={s.fill}
+									opacity={0.26}
+								/>
+							))}
 							<circle
 								cx={xy(c)}
 								cy={xy(r)}
@@ -195,12 +382,14 @@ export function Board({
 							</text>
 							{isLast && (
 								<circle
+									className="last-move-ink"
 									cx={xy(c)}
 									cy={xy(r)}
-									r={STONE_R + 2.5}
+									r={STONE_R + 5}
 									fill="none"
-									stroke="#c0392b"
-									strokeWidth={2}
+									stroke="#20160f"
+									strokeWidth={2.2}
+									filter="url(#ink-waver)"
 								/>
 							)}
 						</g>
@@ -212,10 +401,21 @@ export function Board({
 			{exiting.map((s) => (
 				<g
 					key={`exit-${s.id}`}
-					className={`stone-exit ${
+					className={`stone-exit ink-stone ${
 						s.kind === "fall" ? "stone-exit-fall" : "stone-exit-shatter"
 					}`}
+					filter="url(#ink-soften)"
 				>
+					{inkDotOffsets(s.row, s.col).map((dot, i) => (
+						<circle
+							key={`exit-dot-${i}`}
+							cx={xy(s.col) + dot.dx}
+							cy={xy(s.row) + dot.dy}
+							r={dot.r}
+							fill={s.style.fill}
+							opacity={0.26}
+						/>
+					))}
 					<circle
 						cx={xy(s.col)}
 						cy={xy(s.row)}

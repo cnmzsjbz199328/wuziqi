@@ -43,32 +43,133 @@ body {
 	pointer-events: none;
 }
 
-/* The winner's own 5-in-a-row stones: tremble a few times, then fall
-   away downward with a dramatic tumble. The SVG must have overflow:visible
-   so the stone continues past the board edge instead of clipping. */
-@keyframes stone-fall {
-	0%   { transform: translate(0, 0) rotate(0deg); opacity: 1; }
-	6%   { transform: translate(-2px, 0) rotate(-6deg); }
-	12%  { transform: translate(2px, 0) rotate(6deg); }
-	18%  { transform: translate(-2px, 0) rotate(-5deg); }
-	24%  { transform: translate(2px, 0) rotate(5deg); }
-	30%  { transform: translate(-1px, 0) rotate(-3deg); }
-	36%  { transform: translate(1px, 0) rotate(3deg); }
-	42%  { transform: translate(0, 0) rotate(0deg); opacity: 1; }
-	100% { transform: translate(8px, 520px) rotate(40deg); opacity: 0; }
-}
-.stone-exit-fall {
-	animation: stone-fall 1.8s cubic-bezier(0.4, 0, 0.8, 0.2) forwards;
+/* Ink-wash board effects. SVG keeps the gameplay surface crisp while CSS
+   handles brush motion, ink bloom, and clear/disrupt dissolves. */
+.ink-grid-line {
+	stroke-linecap: round;
+	opacity: 0.68;
 }
 
-/* Opponent stones removed by the disrupt rule: compress inward, then
-   burst outward and dissipate — clearly different from the winner's fall. */
-@keyframes stone-shatter {
-	0%   { transform: scale(1) rotate(0deg); opacity: 1; }
-	15%  { transform: scale(0.7) rotate(-10deg); opacity: 1; }
-	40%  { transform: scale(1.2) rotate(6deg); opacity: 0.85; }
-	100% { transform: scale(2.8) rotate(18deg); opacity: 0; }
+.ink-stone,
+.stone-exit,
+.winning-ink-aura,
+.winning-ink-stroke,
+.winning-ink-ring,
+.stone-ink-bloom,
+.last-move-ink {
+	transform-box: fill-box;
+	transform-origin: center;
 }
+
+.ink-stone > circle:not(.stone-ink-bloom):not(.last-move-ink) {
+	stroke-linecap: round;
+}
+
+.ink-stone-new {
+	animation: ink-stone-land 520ms cubic-bezier(0.2, 0.85, 0.25, 1.15);
+}
+
+.stone-ink-bloom {
+	animation: ink-bloom 680ms ease-out forwards;
+	pointer-events: none;
+}
+
+.last-move-ink {
+	animation: ink-ring-breathe 1.6s ease-in-out infinite;
+	pointer-events: none;
+}
+
+.winning-ink-line,
+.winning-ink-ring,
+.stone-exit {
+	pointer-events: none;
+}
+
+.winning-ink-aura,
+.winning-ink-stroke {
+	stroke-linecap: round;
+}
+
+.winning-ink-aura {
+	stroke: rgba(30, 22, 14, 0.18);
+	stroke-width: 30;
+	filter: blur(3px);
+	animation: winning-wash 3.5s ease-out forwards;
+}
+
+.winning-ink-stroke {
+	stroke: rgba(24, 17, 10, 0.82);
+	stroke-width: 8;
+	stroke-dasharray: 900;
+	stroke-dashoffset: 900;
+	animation: winning-brush 3.5s cubic-bezier(0.16, 0.9, 0.2, 1) forwards;
+}
+
+.winning-ink-ring {
+	animation: ink-ring-pop 3.5s ease-out forwards;
+}
+
+@keyframes ink-stone-land {
+	0% { transform: scale(1.42); opacity: 0; }
+	42% { transform: scale(0.92); opacity: 1; }
+	70% { transform: scale(1.04); }
+	100% { transform: scale(1); }
+}
+
+@keyframes ink-bloom {
+	0% { transform: scale(0.2); opacity: 0.62; }
+	62% { transform: scale(1.12); opacity: 0.24; }
+	100% { transform: scale(1.35); opacity: 0; }
+}
+
+@keyframes ink-ring-breathe {
+	0%, 100% { transform: scale(0.96); opacity: 0.62; }
+	50% { transform: scale(1.08); opacity: 0.3; }
+}
+
+@keyframes winning-brush {
+	0% { stroke-dashoffset: 900; opacity: 0; }
+	20% { stroke-dashoffset: 0; opacity: 1; }
+	63% { opacity: 1; }
+	91% { opacity: 0; }
+	100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes winning-wash {
+	0% { opacity: 0; transform: scaleX(0.12); }
+	20% { opacity: 1; transform: scaleX(1); }
+	63% { opacity: 1; }
+	91% { opacity: 0; }
+	100% { opacity: 0; }
+}
+
+@keyframes ink-ring-pop {
+	0% { transform: scale(0.72); opacity: 0; }
+	15% { opacity: 0.58; }
+	63% { transform: scale(1.05); opacity: 0.58; }
+	91% { transform: scale(1.15); opacity: 0; }
+	100% { transform: scale(1.15); opacity: 0; }
+}
+
+/* The wetter ink-themed removal dissolves */
+@keyframes stone-fall {
+	0%   { transform: translate(0, 0) scale(1); opacity: 1; filter: blur(0); }
+	18%  { transform: translate(-1px, 2px) scale(1.08); opacity: 0.92; }
+	42%  { transform: translate(3px, 18px) scale(1.18, 1.42); opacity: 0.62; filter: blur(0.6px); }
+	100% { transform: translate(8px, 86px) scale(0.74, 2.6); opacity: 0; filter: blur(2px); }
+}
+
+.stone-exit-fall {
+	animation: stone-fall 1.75s cubic-bezier(0.3, 0, 0.7, 1) forwards;
+}
+
+@keyframes stone-shatter {
+	0%   { transform: scale(1) rotate(0deg); opacity: 1; filter: blur(0); }
+	18%  { transform: scale(0.76) rotate(-8deg); opacity: 1; }
+	48%  { transform: scale(1.34) rotate(7deg); opacity: 0.72; filter: blur(0.4px); }
+	100% { transform: scale(3.2) rotate(20deg); opacity: 0; filter: blur(1.6px); }
+}
+
 .stone-exit-shatter {
-	animation: stone-shatter 1.0s ease-out forwards;
+	animation: stone-shatter 1.05s ease-out forwards;
 }
