@@ -57,6 +57,11 @@ interface Props {
 	 * no clear has happened (e.g., single-player fallback).
 	 */
 	clearedBy?: string;
+	/** Optional list of cells that formed the winning run. When present
+	 * the board should highlight them briefly before applying the post-
+	 * clear board (the hook buffers the state update).
+	 */
+	winningPositions?: { row: number; col: number }[];
 }
 
 function xy(idx: number): number {
@@ -74,6 +79,7 @@ export function Board({
 	onPlace,
 	palette = SINGLE_PLAYER_PALETTE,
 	clearedBy,
+	winningPositions,
 }: Props) {
 	const styleFor = (marker: string): StoneStyle =>
 		palette[marker] ?? FALLBACK_STYLE;
@@ -142,6 +148,23 @@ export function Board({
 			))}
 
 			{/* Live stones */}
+			{/* Highlight winning positions (pre-clear) */}
+			{winningPositions?.map((pos, i) => {
+				if (!board[pos.row]?.[pos.col]) return null;
+				return (
+					<g key={`win-${pos.row}-${pos.col}-${i}`}>
+						<circle
+							cx={xy(pos.col)}
+							cy={xy(pos.row)}
+							r={STONE_R + 6}
+							fill="none"
+							stroke="#ffd166"
+							strokeWidth={3}
+							opacity={0.95}
+						/>
+					</g>
+				);
+			})}
 			{board.flatMap((row, r) =>
 				row.map((cell, c) => {
 					if (!cell) return null;
